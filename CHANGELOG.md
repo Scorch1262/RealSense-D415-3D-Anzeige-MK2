@@ -1,5 +1,18 @@
 # Änderungen
 
+## MK2 1.1.0
+- **3Dconnexion-3D-Maus** beim Begehen: Kappe schieben = gehen, drehen = umdrehen, neigen = hoch/runter
+  sehen, heben/drücken = hoch/runter (Fliegen), linke Taste = Startpunkt, rechte Taste = Gehen/Fliegen;
+  Anbindung über Windows Raw Input (ohne Zusatzbibliothek, auch neben 3DxWare)
+- Neues Feld **3D-MAUS**: Gerätestatus, Live-Achsen, Empfindlichkeit, Achsen umkehren; config.ini `[3dmaus]`
+- **Raumscan nur noch aus Tiefe:** das Farbbild wird vollständig ignoriert; während des Scans läuft die
+  Kamera ohne Farbstrom und mit eingeschaltetem IR-Projektor – funktioniert auch bei völliger Dunkelheit
+- Karte speichert Flächennormalen statt Farben; **Kartenfarbe** HÖHE (Farbskala nach Höhe) oder GRAU,
+  jeweils schattiert; config.ini `[raum] farbe`
+- Live-Vorschau beim Scan zeigt das Tiefenbild statt des Farbbilds
+- PLY-Export des Raums enthält Normalen; beim Laden werden sie für die Kartenfarbe genutzt
+- Selbsttest prüft zusätzlich die 3D-Maus-Auswertung
+
 ## MK2 1.0.0
 Neuer Name **RealSense-Viewer-MK2** (baut auf MK1 2.0.2 auf).
 - **Raumscan:** Kamera durch den Raum bewegen, alle Bilder werden per ICP (Punkt-zu-Ebene mit

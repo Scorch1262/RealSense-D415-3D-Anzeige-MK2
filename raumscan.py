@@ -2,8 +2,10 @@
 """
 Raumscan für RealSense-Viewer-MK2.
 
-Die Kamera wird durch den Raum bewegt; jedes Bild wird per ICP (Punkt-zu-Ebene,
-projektive Zuordnung, grob-nach-fein) an ein Schlüsselbild angelegt. Daraus ergibt
+Die Kamera wird durch den Raum bewegt; jedes Tiefenbild wird per ICP (Punkt-zu-Ebene,
+projektive Zuordnung, grob-nach-fein) an ein Schlüsselbild angelegt. Es werden nur die
+Tiefendaten der Stereo-IR-Kameras genutzt, das Farbbild wird nicht gebraucht – der Scan
+funktioniert daher auch bei völliger Dunkelheit (IR-Projektor an). Daraus ergibt
 sich die Kamerabahn, mit der alle Punkte in eine gemeinsame Voxel-Karte eingetragen
 werden. Diese Karte kann anschließend in der Ich-Perspektive begangen werden.
 
@@ -24,7 +26,6 @@ log = logging.getLogger("RealSense-Viewer-MK2")
 C_VIEW = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], np.float64)
 
 ARBEITS_BREITE = 320          # Arbeitsauflösung für Tracking und Karte (Pixel)
-FOTO_GEWICHT = 0.01           # Gewicht des Helligkeitsterms relativ zur Geometrie
 
 
 # --------------------------------------------------------------------------
@@ -97,35 +98,16 @@ def glaetten(depth, valid, r=2):
     return np.where(valid, out, 0).astype(np.float32)
 
 
-def bilinear(img, u, v):
-    h, w = img.shape
-    u0 = np.clip(np.floor(u).astype(np.int32), 0, w - 2)
-    v0 = np.clip(np.floor(v).astype(np.int32), 0, h - 2)
-    a, b = np.clip(u - u0, 0, 1), np.clip(v - v0, 0, 1)
-    return ((img[v0, u0] * (1 - a) + img[v0, u0 + 1] * a) * (1 - b)
-            + (img[v0 + 1, u0] * (1 - a) + img[v0 + 1, u0 + 1] * a) * b)
-
-
 class Bild:
     """Ein für das Tracking aufbereitetes Tiefenbild (Arbeitsauflösung)."""
-    __slots__ = ("V", "N", "M", "rgb", "fx", "fy", "ppx", "ppy", "I", "Gx", "Gy")
+    __slots__ = ("V", "N", "M", "fx", "fy", "ppx", "ppy")
 
-    def __init__(self, depth_m, rgb, fx, fy, ppx, ppy, zmin, zmax):
+    def __init__(self, depth_m, fx, fy, ppx, ppy, zmin, zmax):
         valid = (depth_m > zmin) & (depth_m < zmax)
         d = glaetten(depth_m, valid)
         self.V = vertex_map(d, fx, fy, ppx, ppy)
         self.N, self.M = normal_map(self.V, valid)
-        self.rgb = rgb
         self.fx, self.fy, self.ppx, self.ppy = fx, fy, ppx, ppy
-        self.I = self.Gx = self.Gy = None
-        if rgb is not None:
-            g = (rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114).astype(np.float32) / 255
-            g = glaetten(g + 1.0, np.ones(g.shape, bool), 1) - 1.0     # leichter Weichzeichner
-            gx = np.zeros_like(g)
-            gy = np.zeros_like(g)
-            gx[:, 1:-1] = (g[:, 2:] - g[:, :-2]) * 0.5
-            gy[1:-1, :] = (g[2:, :] - g[:-2, :]) * 0.5
-            self.I, self.Gx, self.Gy = g, gx, gy
 
 
 def icp(cur, ref, T, stufen=((4, 6, 0.20), (2, 5, 0.10), (1, 4, 0.06))):
@@ -150,9 +132,6 @@ def _icp(cur, ref, T, stufen):
         Nc = cur.N[::stride, ::stride][Mc].astype(np.float64)
         if len(P) < 60:
             return res
-        foto = FOTO_GEWICHT > 0 and stride <= 2 and cur.I is not None and ref.I is not None
-        if foto:
-            Ic = cur.I[::stride, ::stride][Mc].astype(np.float64)
         for _ in range(iters):
             R, t = T[:3, :3], T[:3, 3]
             p = P @ R.T + t
@@ -171,7 +150,6 @@ def _icp(cur, ref, T, stufen):
             cnt = int(ok.sum())
             if cnt < 40:
                 return res
-            pf = p
             p, n, d = p[ok], n[ok], d[ok]
             r = (d * n).sum(1)
             J = np.empty((cnt, 6))
@@ -183,31 +161,6 @@ def _icp(cur, ref, T, stufen):
             Jw = J * wgt[:, None]
             H = Jw.T @ J
             g = Jw.T @ r
-            if foto:
-                # Helligkeitsterm: nur Pixel mit deutlichem Bildgradienten
-                pp, ic = pf[ok], Ic[ok]
-                zz = pp[:, 2]
-                uf = fx * pp[:, 0] / zz + ppx
-                vf = fy * pp[:, 1] / zz + ppy
-                gx = bilinear(ref.Gx, uf, vf)
-                gy = bilinear(ref.Gy, uf, vf)
-                sel = (gx * gx + gy * gy) > 0.0004
-                if sel.sum() > 50:
-                    pp, ic, uf, vf, gx, gy, zz = pp[sel], ic[sel], uf[sel], vf[sel], gx[sel], gy[sel], zz[sel]
-                    ri = bilinear(ref.I, uf, vf) - ic
-                    ri -= np.median(ri)                      # Belichtungsunterschied ausgleichen
-                    gv = np.empty((len(pp), 3))
-                    gv[:, 0] = gx * fx / zz
-                    gv[:, 1] = gy * fy / zz
-                    gv[:, 2] = -(gx * fx * pp[:, 0] + gy * fy * pp[:, 1]) / (zz * zz)
-                    Ji = np.empty((len(pp), 6))
-                    Ji[:, :3] = np.cross(pp, gv)
-                    Ji[:, 3:] = gv
-                    ki = 0.05
-                    wi = np.where(np.abs(ri) < ki, 1.0, ki / np.maximum(np.abs(ri), 1e-9)) * FOTO_GEWICHT
-                    Jiw = Ji * wi[:, None]
-                    H = H + Jiw.T @ Ji
-                    g = g + Jiw.T @ ri
             try:
                 x = -np.linalg.solve(H + np.eye(6) * 1e-6 * np.trace(H), g)
             except np.linalg.LinAlgError:
@@ -224,7 +177,7 @@ def _icp(cur, ref, T, stufen):
 # Voxel-Karte
 # --------------------------------------------------------------------------
 class VoxelKarte:
-    """Gemittelte Punkte je Voxel (sortierte Hash-Schlüssel, nur numpy)."""
+    """Gemittelte Punkte und Flächennormalen je Voxel (sortierte Hash-Schlüssel, nur numpy)."""
     OFF = 1 << 20
     MAXW = 25.0
 
@@ -232,7 +185,7 @@ class VoxelKarte:
         self.voxel = float(voxel)
         self.keys = np.zeros(0, np.int64)
         self.pos = np.zeros((0, 3), np.float32)     # gewichtete Summe
-        self.col = np.zeros((0, 3), np.float32)
+        self.nor = np.zeros((0, 3), np.float32)
         self.w = np.zeros(0, np.float32)
         self.version = 0
 
@@ -244,6 +197,7 @@ class VoxelKarte:
         return (i[:, 0] << 42) | (i[:, 1] << 21) | i[:, 2]
 
     def eintragen(self, p, c, wt=None):
+        """p: Punkte, c: Normalen (je Nx3), wt: Gewichte."""
         if len(p) == 0:
             return
         k = self._hash(p)
@@ -264,14 +218,14 @@ class VoxelKarte:
             # gleitender Mittelwert mit begrenztem Gewicht (alte Fehler verblassen)
             scale = np.where(w_old + cnt[found] > self.MAXW, (self.MAXW - cnt[found]).clip(1) / np.maximum(w_old, 1e-6), 1.0)
             self.pos[j] = self.pos[j] * scale[:, None] + sp[found]
-            self.col[j] = self.col[j] * scale[:, None] + sc[found]
+            self.nor[j] = self.nor[j] * scale[:, None] + sc[found]
             self.w[j] = w_old * scale + cnt[found]
         nf = ~found
         if nf.any():
             ins = idx[nf]
             self.keys = np.insert(self.keys, ins, uk[nf])
             self.pos = np.insert(self.pos, ins, sp[nf], axis=0)
-            self.col = np.insert(self.col, ins, sc[nf], axis=0)
+            self.nor = np.insert(self.nor, ins, sc[nf], axis=0)
             self.w = np.insert(self.w, ins, cnt[nf])
         self.version += 1
 
@@ -280,7 +234,9 @@ class VoxelKarte:
         if m.sum() < 1000:
             m = self.w > 0
         w = self.w[m][:, None]
-        return self.pos[m] / w, np.clip(self.col[m] / w, 0, 255)
+        n = self.nor[m]
+        n = n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-6)
+        return self.pos[m] / w, n
 
 
 # --------------------------------------------------------------------------
@@ -305,20 +261,19 @@ class Tracker:
         self.guete = 0.0
 
     @staticmethod
-    def arbeitsbild(depth_m, rgb, fx, fy, ppx, ppy):
+    def arbeitsbild(depth_m, fx, fy, ppx, ppy):
         h, w = depth_m.shape
         s = max(1, int(round(w / ARBEITS_BREITE)))
         if s > 1:
             depth_m = depth_m[::s, ::s]
-            rgb = rgb[::s, ::s] if rgb is not None else None
             fx, fy = fx / s, fy / s
             ppx, ppy = (ppx + 0.5) / s - 0.5, (ppy + 0.5) / s - 0.5
-        return depth_m, rgb, fx, fy, ppx, ppy
+        return depth_m, fx, fy, ppx, ppy
 
-    def verarbeiten(self, depth_m, rgb, fx, fy, ppx, ppy):
-        """Ein neues Bild. Gibt 'ok', 'start' oder 'verloren' zurück."""
-        depth_m, rgb, fx, fy, ppx, ppy = self.arbeitsbild(depth_m, rgb, fx, fy, ppx, ppy)
-        cur = Bild(depth_m, rgb, fx, fy, ppx, ppy, self.zmin, self.zmax)
+    def verarbeiten(self, depth_m, fx, fy, ppx, ppy):
+        """Ein neues Tiefenbild (Meter). Gibt 'ok', 'start' oder 'verloren' zurück."""
+        depth_m, fx, fy, ppx, ppy = self.arbeitsbild(depth_m, fx, fy, ppx, ppy)
+        cur = Bild(depth_m, fx, fy, ppx, ppy, self.zmin, self.zmax)
         if cur.M.sum() < 500:
             self.verloren += 1
             return "verloren"
@@ -380,14 +335,12 @@ class Tracker:
     def _eintragen(self, cur, pose):
         m = cur.M
         P = cur.V[m]
-        if cur.rgb is not None:
-            col = cur.rgb[m].astype(np.float32)
-        else:
-            col = np.full((len(P), 3), 160, np.float32)
+        R = pose[:3, :3].astype(np.float32)
         z = P[:, 2]
         wt = np.clip(1.5 / np.maximum(z, 0.3), 0.3, 1.5)  # nahe Punkte sind genauer
-        Pw = P @ pose[:3, :3].T.astype(np.float32) + pose[:3, 3].astype(np.float32)
-        self.karte.eintragen(Pw, col, wt)
+        Pw = P @ R.T + pose[:3, 3].astype(np.float32)
+        Nw = cur.N[m] @ R.T
+        self.karte.eintragen(Pw, Nw, wt)
         self.letzte_eintragung = (pose.copy(), self.bilder)
 
 
@@ -520,7 +473,7 @@ class ScanWorker(threading.Thread):
             return dict(self.status)
 
     def karte(self):
-        """(version, pos Nx3 in Viewer-Welt, farbe Nx3 0..1, bahn Mx3, pose 4x4) – oder None."""
+        """(version, pos Nx3 in Viewer-Welt, normalen Nx3, bahn Mx3, pose 4x4) – oder None."""
         with self.lock:
             return self._snap
 
@@ -549,7 +502,8 @@ class ScanWorker(threading.Thread):
             self._last_seq = f.seq
             try:
                 depth_m = f.depth.astype(np.float32) * f.units
-                z = self.tracker.verarbeiten(depth_m, f.rgb, f.fx, f.fy, f.ppx, f.ppy)
+                # nur Tiefe – das Farbbild wird bewusst nicht verwendet
+                z = self.tracker.verarbeiten(depth_m, f.fx, f.fy, f.ppx, f.ppy)
             except Exception as exc:  # pragma: no cover
                 log.exception("Raumscan: %s", exc)
                 z = "verloren"
@@ -572,9 +526,11 @@ class ScanWorker(threading.Thread):
 
     def _make_snap(self):
         tr = self.tracker
-        pos, col = tr.karte.punkte()
+        pos, nor = tr.karte.punkte()
         pos_v = np.empty_like(pos)
         pos_v[:, 0], pos_v[:, 1], pos_v[:, 2] = pos[:, 0], pos[:, 2], -pos[:, 1]
+        nor_v = np.empty_like(nor)
+        nor_v[:, 0], nor_v[:, 1], nor_v[:, 2] = nor[:, 0], nor[:, 2], -nor[:, 1]
         bahn = np.array(tr.bahn, np.float32) if tr.bahn else np.zeros((0, 3), np.float32)
         bahn_v = np.empty_like(bahn)
         if len(bahn):
@@ -582,7 +538,7 @@ class ScanWorker(threading.Thread):
         pose_v = C_VIEW @ tr.pose @ np.linalg.inv(C_VIEW)
         with self.lock:
             self._snap_version = tr.karte.version
-            self._snap = (tr.karte.version, pos_v.astype(np.float32), (col / 255).astype(np.float32), bahn_v, pose_v)
+            self._snap = (tr.karte.version, pos_v.astype(np.float32), nor_v.astype(np.float32), bahn_v, pose_v)
             self.status["bahn"] = bahn_v
 
 
@@ -592,20 +548,28 @@ class ScanWorker(threading.Thread):
 META_PREFIX = "mk2 "
 
 
-def ply_schreiben(path, pos, col01, meta=None, programm=""):
-    """Binäres PLY (Meter, Z oben). meta: dict -> Kommentarzeilen 'mk2 schluessel wert'."""
+def ply_schreiben(path, pos, col01, meta=None, programm="", nor=None):
+    """Binäres PLY (Meter, Z oben), optional mit Normalen.
+    meta: dict -> Kommentarzeilen 'mk2 schluessel wert'."""
     n = len(pos)
-    dt = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("r", "u1"), ("g", "u1"), ("b", "u1")])
+    felder = [("x", "<f4"), ("y", "<f4"), ("z", "<f4")]
+    if nor is not None:
+        felder += [("nx", "<f4"), ("ny", "<f4"), ("nz", "<f4")]
+    dt = np.dtype(felder + [("r", "u1"), ("g", "u1"), ("b", "u1")])
     arr = np.empty(n, dt)
     arr["x"], arr["y"], arr["z"] = pos[:, 0], pos[:, 1], pos[:, 2]
+    if nor is not None:
+        arr["nx"], arr["ny"], arr["nz"] = nor[:, 0], nor[:, 1], nor[:, 2]
     c = (np.clip(col01, 0, 1) * 255 + 0.5).astype(np.uint8)
     arr["r"], arr["g"], arr["b"] = c[:, 0], c[:, 1], c[:, 2]
     head = ["ply", "format binary_little_endian 1.0",
             f"comment {programm} - Raumscan, Meter, Z nach oben, Boden bei Z=0".strip()]
     for k, v in (meta or {}).items():
         head.append(f"comment {META_PREFIX}{k} {v}")
-    head += [f"element vertex {n}", "property float x", "property float y", "property float z",
-             "property uchar red", "property uchar green", "property uchar blue", "end_header"]
+    head += [f"element vertex {n}", "property float x", "property float y", "property float z"]
+    if nor is not None:
+        head += ["property float nx", "property float ny", "property float nz"]
+    head += ["property uchar red", "property uchar green", "property uchar blue", "end_header"]
     with open(path, "wb") as fh:
         fh.write(("\n".join(head) + "\n").encode("ascii", "replace"))
         fh.write(arr.tobytes())
@@ -617,7 +581,8 @@ _PLY_TYPES = {"char": "i1", "int8": "i1", "uchar": "u1", "uint8": "u1", "short":
 
 
 def ply_lesen(path):
-    """Liest die Punkte (Vertices) einer PLY-Datei. Liefert (pos Nx3 float32, farbe Nx3 0..1, meta dict).
+    """Liest die Punkte (Vertices) einer PLY-Datei.
+    Liefert (pos Nx3 float32, farbe Nx3 0..1, normalen Nx3 oder None, meta dict).
     Flächen werden ignoriert – ein Netz wird als Punktwolke seiner Eckpunkte geladen."""
     with open(path, "rb") as fh:
         if fh.readline().strip() != b"ply":
@@ -681,5 +646,28 @@ def ply_lesen(path):
             col /= 255.0
     else:
         col = np.full((len(pos), 3), 0.7, np.float32)
+    nor = None
+    if all(k in cols for k in ("nx", "ny", "nz")):
+        nor = np.stack([cols["nx"], cols["ny"], cols["nz"]], 1).astype(np.float32)
     ok = np.isfinite(pos).all(1)
-    return pos[ok], np.clip(col[ok], 0, 1), meta
+    return pos[ok], np.clip(col[ok], 0, 1), (nor[ok] if nor is not None else None), meta
+
+
+# --------------------------------------------------------------------------
+# Einfärben (ohne Farbkamera): Schattierung aus den Flächennormalen
+# --------------------------------------------------------------------------
+LICHT = np.array([0.35, 0.55, 0.76], np.float32) / np.linalg.norm([0.35, 0.55, 0.76])
+
+
+def einfaerben(pos, nor, modus, lut=None):
+    """modus 'hoehe': Farbskala nach Höhe (Z), 'grau': neutral. Beides schattiert.
+    pos/nor in der ausgerichteten Welt (Boden Z=0). lut: 256x3 float (0..1)."""
+    shade = 0.32 + 0.68 * np.abs(nor @ LICHT)
+    if modus == "hoehe" and lut is not None and len(pos):
+        z = pos[:, 2]
+        top = max(2.0, float(np.percentile(z, 98)))
+        idx = np.clip((z / top * 255), 0, 255).astype(np.int32)
+        base = lut[idx] * 0.85 + 0.15
+    else:
+        base = np.broadcast_to(np.array([0.80, 0.84, 0.86], np.float32), (len(pos), 3))
+    return np.clip(base * shade[:, None], 0, 1).astype(np.float32)

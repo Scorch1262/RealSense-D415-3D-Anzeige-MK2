@@ -1,19 +1,28 @@
 # RealSense-Viewer-MK2
 
-**Version 1.0.0** · reines Desktop-Programm für Windows (kein Browser, kein Webserver)
+**Version 1.1.0** · reines Desktop-Programm für Windows (kein Browser, kein Webserver)
 
-Zeigt das 3D-Bild einer per USB angeschlossenen **Intel RealSense D415** live in einem eigenen Programmfenster an – im Design der Dashboards (dunkel, Amber/Teal). Neu in MK2: **Raumscan**. Man trägt die Kamera durch den Raum, das Programm setzt alle Bilder zu einer zusammenhängenden 3D-Karte zusammen – und durch diese Karte kann man anschließend **wie in einem virtuellen Raum gehen und sich umsehen**.
+Zeigt das 3D-Bild einer per USB angeschlossenen **Intel RealSense D415** live in einem eigenen Programmfenster an – im Design der Dashboards (dunkel, Amber/Teal). Neu in MK2: **Raumscan**. Man trägt die Kamera durch den Raum, das Programm setzt alle Bilder zu einer zusammenhängenden 3D-Karte zusammen – und durch diese Karte kann man anschließend **wie in einem virtuellen Raum gehen und sich umsehen** – mit Tastatur und Maus oder mit einer **3Dconnexion-3D-Maus**. Der Scan nutzt **nur die Tiefenkameras** (Stereo-IR) und funktioniert daher auch in **völliger Dunkelheit**.
 
 ![RealSense-Viewer-MK2 – Begehen eines gescannten Raums (Demo-Raum) mit Minikarte](docs/screenshot.png)
 
-*Begehen-Modus im eingebauten Demo-Raum: Ich-Perspektive in Augenhöhe, rechts oben die Minikarte mit eigener Position und Blickrichtung.*
+*Begehen-Modus im eingebauten Demo-Raum, Kartenfarbe „Höhe“: Ich-Perspektive in Augenhöhe, rechts oben die Minikarte mit eigener Position und Blickrichtung.*
 
 ## Raumscan und Begehen (neu in MK2)
 
 1. Reiter **RAUM** öffnen (Taste 5) und **SCAN STARTEN** drücken.
-2. Kamera **langsam** schwenken und durch den Raum tragen, Abstand zu den Flächen 0,5–3 m. Rechts oben läuft das Live-Bild mit, die Karte wächst mit; die türkise Linie zeigt den bisherigen Weg der Kamera.
+2. Kamera **langsam** schwenken und durch den Raum tragen, Abstand zu den Flächen 0,5–3 m. Rechts oben läuft das Live-Tiefenbild mit, die Karte wächst mit; die türkise Linie zeigt den bisherigen Weg der Kamera.
 3. Erscheint **TRACKING VERLOREN**, zur zuletzt erfassten Stelle zurückkehren und dorthin zielen – das Programm findet sich dann selbst wieder.
 4. **SCAN PAUSIEREN**, dann **RAUM BEGEHEN** (Taste B). Der Boden wird automatisch erkannt und waagerecht ausgerichtet, man steht in Augenhöhe am Startpunkt des Scans.
+
+### Nur Tiefe – auch im Dunkeln
+
+Während der Scan läuft, betreibt das Programm die D415 **ohne Farbstrom**: Der Farbsensor wird abgeschaltet, der IR-Projektor eingeschaltet, und das Tracking rechnet ausschließlich mit den Tiefendaten der beiden IR-Kameras. Licht wird dafür nicht gebraucht – das Projektor-Muster liefert die nötige Struktur. Beim Pausieren schaltet die Kamera den Farbstrom wieder zu (dabei startet sie kurz neu).
+
+Da es keine echten Farben gibt, wird die Karte aus der Form eingefärbt (**Kartenfarbe**):
+
+- **HÖHE** – Farbskala nach Höhe über dem Boden, schattiert. Gut zur Orientierung.
+- **GRAU** – neutral schattiert, wirkt wie ein Gipsmodell.
 
 ### Steuerung beim Begehen
 
@@ -28,6 +37,22 @@ Zeigt das 3D-Bild einer per USB angeschlossenen **Intel RealSense D415** live in
 | F | zwischen **Gehen** und **Fliegen** wechseln |
 | R | zurück zum Startpunkt |
 | Esc | Begehen beenden |
+
+### 3Dconnexion-3D-Maus
+
+SpaceMouse, SpaceNavigator, SpacePilot u. Ä. funktionieren beim Begehen zusätzlich zu Tastatur und Maus – einfach anschließen, keine weitere Einrichtung nötig (das Programm liest das Gerät unter Windows direkt über *Raw Input*; der 3DxWare-Treiber darf installiert sein).
+
+| Kappe | Funktion |
+|---|---|
+| von sich weg schieben / heranziehen | vorwärts / rückwärts gehen |
+| nach links / rechts schieben | seitwärts gehen |
+| im / gegen den Uhrzeigersinn drehen | nach rechts / links drehen |
+| nach vorn / hinten neigen | nach unten / oben sehen |
+| anheben / herunterdrücken | hoch / runter (Modus Fliegen) |
+| linke Taste | zurück zum Startpunkt |
+| rechte Taste | Gehen / Fliegen wechseln |
+
+Im Feld **3D-MAUS** der Seitenleiste stehen Gerätestatus und die sechs Achsen live (zum Prüfen der Richtungen), dazu Empfindlichkeit und Schalter zum Umkehren von Vor/Zurück, Neigen und Drehen. Weitere Achsen lassen sich in der config.ini umkehren. Die 3D-Maus wirkt nur, solange das Programmfenster im Vordergrund ist. Hat 3DxWare die beiden Tasten mit eigenen Funktionen belegt (z. B. Menü), kommen sie im Programm unter Umständen nicht an – dann in den 3DxWare-Einstellungen für dieses Programm die Tastenbelegung zurücksetzen.
 
 - **Gehen:** feste Augenhöhe über dem Boden; mit „Wände und Möbel blockieren“ kann man nicht durch gescannte Hindernisse laufen, man gleitet an ihnen entlang.
 - **Fliegen:** frei in alle Richtungen, auch durch Wände und über Möbel.
@@ -46,7 +71,7 @@ Ist keine D415 angeschlossen, liefert das Programm einen **Demo-Raum**: ein möb
 
 ### So funktioniert der Scan
 
-Jedes Tiefenbild wird per ICP (Punkt-zu-Ebene, grob-nach-fein) an ein Schlüsselbild angelegt, unterstützt durch einen Helligkeitsterm aus dem Farbbild. Daraus ergibt sich die Bahn der Kamera, mit der die Punkte in eine gemeinsame Voxel-Karte eingetragen und gemittelt werden. Alles läuft in einem eigenen Thread, ohne zusätzliche Bibliotheken (nur numpy). Die D415 hat keinen Bewegungssensor – wie gut der Scan wird, hängt daher von Struktur im Bild ab: Möbel, Kanten und Muster helfen, eine einzelne glatte weiße Wand in Nahaufnahme nicht.
+Jedes Tiefenbild wird per ICP (Punkt-zu-Ebene, grob-nach-fein) an ein Schlüsselbild angelegt. Daraus ergibt sich die Bahn der Kamera, mit der Punkte und Flächennormalen in eine gemeinsame Voxel-Karte eingetragen und gemittelt werden. Alles läuft in einem eigenen Thread, ohne zusätzliche Bibliotheken (nur numpy). Die D415 hat keinen Bewegungssensor, und der Scan nutzt bewusst nur die Form des Raums – er braucht daher räumliche Struktur im Bild: Möbel, Kanten, Ecken und Gegenstände helfen. Sieht die Kamera längere Zeit nur eine glatte Wand und den Boden, kann sich die Karte entlang dieser Flächen um einige Zentimeter verschieben; dann etwas mehr Raum ins Bild nehmen.
 
 ## Weitere Funktionen (aus MK1)
 
@@ -94,7 +119,8 @@ Probleme werden in `realsense-viewer.log` neben der exe protokolliert – dort s
 ### Tipps für einen guten Raumscan
 
 - Langsam bewegen – lieber drehen als schnell gehen. Die Anzeige *Tracking* in der Seitenleiste zeigt Bilder pro Sekunde und die Übereinstimmung in Prozent.
-- Farbstrom eingeschaltet lassen (Standard): Er stabilisiert das Tracking vor glatten Flächen.
+- Möbel, Ecken und Kanten im Bild halten, nicht nur eine glatte Wand.
+- IR-Projektor nicht ausschalten – im Dunkeln liefert die D415 ohne ihn keine Tiefe (beim Scan wird er automatisch eingeschaltet).
 - Glättung (räumlich/zeitlich) eingeschaltet lassen; *Max. Distanz* hat keinen Einfluss auf den Scan (dieser nutzt 0,2–3,5 m).
 - Den Boden mit erfassen (Kamera leicht nach unten neigen) – sonst kann die Augenhöhe beim Begehen nur geschätzt werden.
 
@@ -114,13 +140,16 @@ Wird beim ersten Start neben der exe angelegt.
 | `[raum]` | `voxel_cm` | Punktabstand der Raumkarte: `1`, `2`, `3` |
 | `[raum]` | `modus`, `kollision` | `gehen` / `fliegen`, Hindernisse `ja` / `nein` |
 | `[raum]` | `augenhoehe_m`, `tempo_m_s`, `fuellung` | Begehen |
+| `[raum]` | `farbe` | Kartenfarbe `hoehe` oder `grau` |
+| `[3dmaus]` | `aktiv`, `empfindlichkeit` | 3D-Maus beim Begehen |
+| `[3dmaus]` | `umkehr_vor`, `umkehr_seite`, `umkehr_hoch`, `umkehr_neigen`, `umkehr_drehen` | Achsen umkehren (`ja`/`nein`) |
 | `[fenster]` | `breite`, `hoehe`, `maximiert` | Fenster |
 
 ## Bauen per GitHub Actions
 
 1. Inhalt dieser Zip in ein GitHub-Repository hochladen (inkl. Ordner `.github`).
-2. Bei jedem Push auf `main`/`master` baut der Workflow **Build Windows EXE** die exe mit PyInstaller, startet sie mit `--selbsttest` (prüft dabei auch den Raumscan am Demo-Raum) und stellt sie als Artefakt bereit (Reiter *Actions* → Lauf → *Artifacts*).
-3. Für ein Release einen Tag setzen, z. B. `git tag v1.0.0 && git push --tags` – dann erscheint die fertige Zip unter *Releases*.
+2. Bei jedem Push auf `main`/`master` baut der Workflow **Build Windows EXE** die exe mit PyInstaller, startet sie mit `--selbsttest` (prüft dabei auch den Raumscan am Demo-Raum und die 3D-Maus-Auswertung) und stellt sie als Artefakt bereit (Reiter *Actions* → Lauf → *Artifacts*).
+3. Für ein Release einen Tag setzen, z. B. `git tag v1.1.0 && git push --tags` – dann erscheint die fertige Zip unter *Releases*.
 
 Die Versionsnummer steht in `app.py` (`APP_VERSION`) und wird automatisch in exe-Eigenschaften, Zip-Namen und Fenster übernommen.
 
@@ -140,7 +169,8 @@ RealSense-Viewer-MK2/
 ├── app.py                      Programmfenster (PySide6/Qt + pyqtgraph-OpenGL)
 ├── kamera.py                   Kamera-Thread, Demo-Raum-Anbindung, config.ini
 ├── raumscan.py                 Tracking (ICP), Voxel-Karte, Bodenerkennung, Hindernisse, PLY
-├── raumansicht.py              begehbare 3D-Ansicht (Ich-Perspektive, Minikarte)
+├── raumansicht.py              begehbare 3D-Ansicht (Ich-Perspektive, Minikarte, 3D-Maus-Steuerung)
+├── spacemouse.py               3Dconnexion-3D-Maus über Windows Raw Input
 ├── demoraum.py                 möbliertes Demo-Zimmer für Tests ohne Kamera
 ├── requirements.txt
 ├── assets/                     icon.ico, icon.png, logo.svg, pfeil.png
@@ -152,6 +182,6 @@ RealSense-Viewer-MK2/
 ## Hinweise
 
 - PLY-Export Einzelbild: Einheit Meter, Z zeigt nach oben, die Kamera sitzt im Ursprung und blickt in +Y-Richtung.
-- PLY-Export Raum: Einheit Meter, Z nach oben, Boden bei Z = 0, Startpunkt im Ursprung.
+- PLY-Export Raum: Einheit Meter, Z nach oben, Boden bei Z = 0, Startpunkt im Ursprung; mit Flächennormalen und der aktuellen Kartenfarbe.
 - Bei 1280×720 mit Punktabstand 1 sind es bis zu 920.000 Punkte – auf schwächeren Grafikkarten Punktabstand 2 wählen. Der Raumscan rechnet unabhängig davon intern mit etwa 320 Pixel Breite.
 - Ein großer Raum mit 1-cm-Raster kann mehrere Millionen Punkte haben; dann eher 2 cm wählen.

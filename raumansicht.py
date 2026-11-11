@@ -6,6 +6,9 @@ Normalbetrieb wie die übrige 3D-Ansicht (Kreisen um einen Mittelpunkt). Im Modu
 „Begehen“ sitzt die Kamera in Augenhöhe im gescannten Raum:
 W A S D / Pfeiltasten gehen, Maus ziehen = umsehen, Q/E runter/hoch (Fliegen),
 Umschalt = schneller, R = zum Startpunkt, F = Gehen/Fliegen, Esc = beenden.
+Zusätzlich mit einer 3Dconnexion-3D-Maus: Kappe schieben = gehen, heben/drücken = hoch/runter
+(Fliegen), drehen = umdrehen, neigen = nach oben/unten sehen; linke Taste = Startpunkt,
+rechte Taste = Gehen/Fliegen.
 """
 
 import math
@@ -70,6 +73,12 @@ class RaumView(gl.GLViewWidget):
         self.thumb = None             # kleines Live-Kamerabild (nur beim Scannen)
         self.thumb_text = ""
         self.keys = set()
+        # 3D-Maus (spacemouse.SpaceMouse) – wird vom Hauptfenster gesetzt
+        self.maus = None
+        self.maus_aktiv = True
+        self.maus_empf = 1.0
+        self.maus_umkehr = {"vor": False, "seite": False, "hoch": False, "neigen": False, "drehen": False}
+        self._maus_tasten = 0
         self._last_t = None
         self._drag = None
         self._orbit = None
@@ -197,19 +206,47 @@ class RaumView(gl.GLViewWidget):
         now = time.perf_counter()
         dt = 0.0 if self._last_t is None else min(0.1, now - self._last_t)
         self._last_t = now
-        K = self.keys
-        if not K or dt <= 0:
+        if dt <= 0:
             return
+        K = self.keys
         fw = int(Qt.Key_W in K or Qt.Key_Up in K) - int(Qt.Key_S in K or Qt.Key_Down in K)
         sd = int(Qt.Key_D in K) - int(Qt.Key_A in K)
         up = int(Qt.Key_E in K or Qt.Key_PageUp in K) - int(Qt.Key_Q in K or Qt.Key_PageDown in K)
-        turn = int(Qt.Key_Left in K) - int(Qt.Key_Right in K)
+        turn = float(int(Qt.Key_Left in K) - int(Qt.Key_Right in K))
+        tilt = 0.0
+        fw, sd, up = float(fw), float(sd), float(up)
+
+        # 3D-Maus: Achsen addieren sich zur Tastatur
+        if self.maus is not None and self.maus_aktiv:
+            tx, ty, tz, rx, _ry, rz = self.maus.achsen()
+            u, e = self.maus_umkehr, self.maus_empf
+            sgn = lambda k: -1.0 if u[k] else 1.0       # noqa: E731
+            fw += -ty * e * sgn("vor")                  # Kappe von sich weg schieben = vorwärts
+            sd += tx * e * sgn("seite")
+            up += -tz * e * sgn("hoch")                 # Kappe anheben = hoch (nur Fliegen)
+            turn += -rz * e * sgn("drehen")             # Kappe im Uhrzeigersinn = rechts herum
+            tilt += rx * e * sgn("neigen")              # Kappe nach vorn neigen = nach unten sehen
+            t = self.maus.tasten
+            neu = t & ~self._maus_tasten
+            self._maus_tasten = t
+            if neu & 1:
+                self.zum_start()
+            if neu & 2:
+                self.set_modus("gehen" if self.modus == "fliegen" else "fliegen")
+                self.modusChanged.emit(self.modus)
+
+        if not (fw or sd or up or turn or tilt):
+            return
         if turn:
-            self.yaw = (self.yaw + turn * 90.0 * dt) % 360
+            self.yaw = (self.yaw + max(-2.0, min(2.0, turn)) * 90.0 * dt) % 360
+        if tilt:
+            lim = 85.0 if self.modus == "fliegen" else 60.0
+            self.pitch = max(-lim, min(lim, self.pitch + max(-2.0, min(2.0, tilt)) * 60.0 * dt))
         v = self.tempo * dt * (2.5 if QApplication.keyboardModifiers() & Qt.ShiftModifier else 1.0)
+        fw, sd, up = (max(-2.5, min(2.5, a)) for a in (fw, sd, up))
         if fw or sd or up:
             self._move(fw * v, sd * v, up * v)
-        elif turn:
+        else:
             self.update()
             self.moved.emit()
 

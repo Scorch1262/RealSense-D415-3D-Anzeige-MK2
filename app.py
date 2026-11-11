@@ -7,23 +7,26 @@ angeschlossenen Intel RealSense D415 in einem eigenen Programmfenster an
 (Qt/PySide6 + OpenGL), im Design der Dashboards.
 Neu in MK2: Raumscan – die Kamera wird durch den Raum bewegt, daraus entsteht eine
 zusammenhängende 3D-Karte, durch die man anschließend wie in einem virtuellen Raum
-gehen und sich umsehen kann.
+gehen und sich umsehen kann – auch mit einer 3Dconnexion-3D-Maus. Der Raumscan nutzt nur
+die Tiefenkameras (Stereo-IR) und funktioniert daher auch in völliger Dunkelheit.
 """
 
 import logging
 import math
 import os
+import struct
 import sys
 import time
 from pathlib import Path
 
 APP_NAME = "RealSense-Viewer-MK2"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 import numpy as np  # noqa: E402
 
 import kamera  # noqa: E402
 import raumscan  # noqa: E402
+import spacemouse  # noqa: E402
 from kamera import (AUFLOESUNGEN, ASSET_DIR, BASE_DIR, CONFIG_PATH, FPS_WERTE,  # noqa: E402
                     CameraWorker, cfg_get, cfg_save, cfg_set, truthy)
 
@@ -77,12 +80,21 @@ def selbsttest():
         w, h, f = 320, 180, 225.0
         tr = raumscan.Tracker(0.02)
         for i in range(3):
-            z, rgb = demoraum.render(w, h, f, f, (w - 1) / 2, (h - 1) / 2, *demoraum.kamera_pose(i / 15))
-            ergebnis = tr.verarbeiten(z, rgb, f, f, (w - 1) / 2, (h - 1) / 2)
+            z, _rgb = demoraum.render(w, h, f, f, (w - 1) / 2, (h - 1) / 2, *demoraum.kamera_pose(i / 15))
+            ergebnis = tr.verarbeiten(z, f, f, (w - 1) / 2, (h - 1) / 2)     # nur Tiefe
         if ergebnis != "ok":
             raise RuntimeError(f"Tracking: {ergebnis}")
         return f"– {len(tr.karte)} Voxel"
     chk("Raumscan", scan_check)
+
+    def maus_check():
+        bericht = bytes([1]) + struct.pack("<6h", 100, -200, 0, 0, 50, -350)
+        sm = spacemouse.SpaceMouse()
+        sm.verarbeite_hid(bericht, 1, len(bericht))
+        if sm.roh != [100, -200, 0, 0, 50, -350]:
+            raise RuntimeError(f"HID-Auswertung falsch: {sm.roh}")
+        return "– Raw Input" if spacemouse.IST_WINDOWS else "– (nur Windows)"
+    chk("3D-Maus", maus_check)
     lines.append("Ergebnis: " + ("OK" if ok else "FEHLER"))
     text = "\n".join(lines)
     try:
@@ -513,7 +525,11 @@ class MainWindow(QMainWindow):
         # Raumkarte (Viewer-Welt, noch nicht am Boden ausgerichtet)
         self.raum_quelle = "scan"      # scan | datei
         self.raum_pos = None
-        self.raum_col = None
+        self.raum_col = None           # Farben aus Datei (ohne Normalen)
+        self.raum_nor = None           # Flächennormalen (Scan oder MK2-Datei)
+        self.raum_farbe = cfg_get("raum", "farbe") if cfg_get("raum", "farbe") in ("hoehe", "grau") else "hoehe"
+        self.maus = spacemouse.SpaceMouse()
+        self._maus_angemeldet = False
         self.raum_bahn = np.zeros((0, 3), np.float32)
         self.raum_pose = np.eye(4)
         self.raum_meta = {}
@@ -564,6 +580,8 @@ class MainWindow(QMainWindow):
         self.save_timer = QTimer(self, singleShot=True, interval=400, timeout=cfg_save)
         self.scan_timer = QTimer(self, interval=200, timeout=self._poll_scan)
         self.scan_timer.start()
+        self.maus_timer = QTimer(self, interval=100, timeout=self._poll_maus)
+        self.maus_timer.start()
         self.frame_timer = QTimer(self, interval=15, timeout=self._poll_frame)
         self.status_timer = QTimer(self, interval=500, timeout=self._poll_status)
         self.clock_timer = QTimer(self, interval=1000, timeout=self._tick_clock)
@@ -677,6 +695,8 @@ class MainWindow(QMainWindow):
         p.add(row)
         p.add(make_label("Punktabstand der Karte", "fieldLabel"))
         self.seg_voxel = p.add(Segmented([("1", "1 CM"), ("2", "2 CM"), ("3", "3 CM")]))
+        p.add(make_label("Kartenfarbe (ohne Farbkamera)", "fieldLabel"))
+        self.seg_farbe = p.add(Segmented([("hoehe", "HÖHE"), ("grau", "GRAU")]))
         row = QHBoxLayout()
         row.setSpacing(8)
         self.btn_raum_laden = make_button("LADEN")
@@ -684,7 +704,8 @@ class MainWindow(QMainWindow):
         row.addWidget(self.btn_raum_laden)
         row.addWidget(self.btn_raum_speichern)
         p.add(row)
-        hint = make_label("Kamera langsam schwenken und gehen (0,5–3 m Abstand). "
+        hint = make_label("Nur Tiefenkameras – funktioniert auch im Dunkeln (IR-Projektor wird eingeschaltet). "
+                          "Kamera langsam schwenken und gehen (0,5–3 m Abstand). "
                           "Bei VERLOREN zur letzten erfassten Stelle zurückkehren.", "hint")
         hint.setWordWrap(True)
         hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -711,6 +732,32 @@ class MainWindow(QMainWindow):
         self.btn_start = p.add(make_button("ZUM STARTPUNKT"))
         hint = make_label("W A S D / Pfeile: gehen · Maus ziehen: umsehen · Q/E: runter/hoch · "
                           "Umschalt: schnell · R: Start · F: Gehen/Fliegen · Esc: beenden", "hint")
+        hint.setWordWrap(True)
+        hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        p.add(hint)
+        lay.addWidget(p)
+
+        # 3D-MAUS
+        p = Panel("3D-MAUS")
+        row = QHBoxLayout()
+        row.addWidget(make_label("Gerät", "kvKey"))
+        row.addStretch()
+        self.lbl_maus = make_label("—", "scanState")
+        self.lbl_maus.setProperty("state", "idle")
+        row.addWidget(self.lbl_maus)
+        p.add(row)
+        self.lbl_maus_achsen = p.add(make_label("T  +0.00 +0.00 +0.00\nR  +0.00 +0.00 +0.00", "kvValMono"))
+        self.chk_maus = p.add(Toggle("Beim Begehen verwenden"))
+        row, self.lbl_maus_empf = field_header("Empfindlichkeit")
+        p.add(row)
+        self.rng_maus_empf = p.add(QSlider(Qt.Horizontal))
+        self.rng_maus_empf.setRange(2, 30)      # × 0,1
+        self.chk_maus_vor = p.add(Toggle("Vor/Zurück umkehren"))
+        self.chk_maus_neigen = p.add(Toggle("Neigen umkehren"))
+        self.chk_maus_drehen = p.add(Toggle("Drehen umkehren"))
+        hint = make_label("Kappe schieben: gehen · drehen: umdrehen · neigen: hoch/runter sehen · "
+                          "heben/drücken: hoch/runter (Fliegen) · linke Taste: Startpunkt · rechte Taste: Gehen/Fliegen",
+                          "hint")
         hint.setWordWrap(True)
         hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         p.add(hint)
@@ -842,6 +889,10 @@ class MainWindow(QMainWindow):
         self.btn_scan.toggled.connect(self._on_scan)
         self.btn_scan_neu.clicked.connect(self._scan_neu)
         self.seg_voxel.changed.connect(self._on_voxel)
+        self.seg_farbe.changed.connect(self._on_farbe)
+        for w in (self.chk_maus, self.chk_maus_vor, self.chk_maus_neigen, self.chk_maus_drehen):
+            w.toggled.connect(self._on_maus_opts)
+        self.rng_maus_empf.valueChanged.connect(self._on_maus_opts)
         self.btn_raum_laden.clicked.connect(self.raum_laden)
         self.btn_raum_speichern.clicked.connect(self.raum_speichern)
         self.btn_walk.toggled.connect(self.begehen)
@@ -1037,6 +1088,17 @@ class MainWindow(QMainWindow):
         self.rng_tempo.setValue(int(round(num("tempo_m_s", 1.4) * 10)))
         self.rng_fuell.setValue(int(round(num("fuellung", 1.8) * 10)))
         self._on_walk_opts()
+        self.seg_farbe.set_value(self.raum_farbe)
+        self.chk_maus.setChecked(truthy(cfg_get("3dmaus", "aktiv")))
+        try:
+            self.rng_maus_empf.setValue(int(round(float(cfg_get("3dmaus", "empfindlichkeit")) * 10)))
+        except ValueError:
+            self.rng_maus_empf.setValue(10)
+        self.chk_maus_vor.setChecked(truthy(cfg_get("3dmaus", "umkehr_vor")))
+        self.chk_maus_neigen.setChecked(truthy(cfg_get("3dmaus", "umkehr_neigen")))
+        self.chk_maus_drehen.setChecked(truthy(cfg_get("3dmaus", "umkehr_drehen")))
+        self.raum.maus = self.maus
+        self._on_maus_opts()
         self._updating_ui = False
         self._apply_local()
         self.set_view(cfg_get("ansicht", "ansicht") or "3d", False)
@@ -1261,11 +1323,10 @@ class MainWindow(QMainWindow):
             else:
                 self.view_color.set_image(None)
                 self.pane_color.hud.setText("KEIN FARBSTROM")
-        if self.view == "raum" and self.scan.aktiv and not self.raum.walk and f.rgb is not None:
-            sub = np.ascontiguousarray(f.rgb[::2, ::2])
-            self.raum.thumb = QImage(sub.data, sub.shape[1], sub.shape[0], sub.shape[1] * 3,
-                                     QImage.Format_RGB888).copy()
-            self.raum.thumb_text = "LIVE · DEMO" if f.demo else "LIVE"
+        if self.view == "raum" and self.scan.aktiv and not self.raum.walk:
+            # Live-Vorschau aus der Tiefe (der Raumscan nutzt kein Farbbild)
+            self.raum.thumb = self.depth_image(f)
+            self.raum.thumb_text = "TIEFE LIVE · DEMO" if f.demo else "TIEFE LIVE"
             self.raum.update()
         self.badge_demo.setVisible(bool(f.demo))
         self.stack3d.setCurrentIndex(0)
@@ -1401,7 +1462,8 @@ class MainWindow(QMainWindow):
                     self.raum_pos = None
                     self._raum_dirty = True
             elif snap[0] != self._scan_ver:
-                self._scan_ver, self.raum_pos, self.raum_col, self.raum_bahn, _ = snap
+                self._scan_ver, self.raum_pos, self.raum_nor, self.raum_bahn, _ = snap
+                self.raum_col = None
                 self.raum_voxel = self.scan.tracker.voxel
                 self._raum_dirty = True
             self.raum_pose = st["pose"]
@@ -1429,7 +1491,7 @@ class MainWindow(QMainWindow):
             return
         pos = transformieren(self.align, self.raum_pos) if self.align_done else self.raum_pos
         col = np.ones((len(pos), 4), np.float32)
-        col[:, :3] = self.raum_col
+        col[:, :3] = self._raum_farben(pos)
         if walk:
             size = self.raum_voxel * self.rng_fuell.value() / 10
             self.raum_cloud.setData(pos=pos, color=col, size=size, pxMode=False)
@@ -1442,6 +1504,26 @@ class MainWindow(QMainWindow):
         else:
             self.raum_bahn_item.setVisible(False)
         self.raum_grid.setVisible(self.align_done and self.chk_grid.isChecked() and not walk)
+
+    def _raum_farben(self, pos):
+        """Farben der Karte: aus den Normalen schattiert (Höhe/Grau) oder – bei fremden Dateien – aus der Datei."""
+        if self.raum_nor is None:
+            if self.raum_col is not None:
+                return self.raum_col
+            return np.full((len(pos), 3), 0.75, np.float32)
+        nor = self.raum_nor @ self.align[:3, :3].T.astype(np.float32) if self.align_done else self.raum_nor
+        if not self.align_done and len(pos):
+            # Boden noch nicht bestimmt: Höhe vorläufig ab dem tiefsten Bereich messen
+            pos = pos.copy()
+            pos[:, 2] -= np.percentile(pos[:, 2], 2)
+        return raumscan.einfaerben(pos, nor, self.raum_farbe, TURBO_F)
+
+    def _on_farbe(self, v):
+        self.raum_farbe = v
+        self._set("raum", "farbe", v)
+        if self.raum_nor is None and self.raum_pos is not None:
+            self.flash("Diese Datei enthält keine Normalen – es werden ihre eigenen Farben gezeigt", warn=True)
+        self._raum_anzeigen()
 
     def _update_raum_hud(self):
         n = 0 if self.raum_pos is None else len(self.raum_pos)
@@ -1466,12 +1548,14 @@ class MainWindow(QMainWindow):
                 self._scan_ver = -1
                 self.raum_pos = None
                 self._neue_karte()
+            self.cam.set_nur_tiefe(True)       # Farbsensor aus: Scan nur aus Tiefe, auch im Dunkeln
             self.scan.starten()
             if self.view != "raum":
                 self.set_view("raum", True)
-            self.flash("Raumscan läuft – Kamera langsam bewegen")
+            self.flash("Raumscan läuft (nur Tiefe, Farbkamera aus) – Kamera langsam bewegen")
         else:
             self.scan.pausieren()
+            self.cam.set_nur_tiefe(False)
 
     def _neue_karte(self):
         self.align = np.eye(4)
@@ -1619,6 +1703,70 @@ class MainWindow(QMainWindow):
         if self.raum.walk and self.sender() is self.rng_fuell:
             self._raum_anzeigen()
 
+    # ------------------------------------------------------------- 3D-Maus
+    def _on_maus_opts(self):
+        e = self.rng_maus_empf.value() / 10
+        self.lbl_maus_empf.setText(f"{e:.1f} ×")
+        r = self.raum
+        r.maus_aktiv = self.chk_maus.isChecked()
+        r.maus_empf = e
+        r.maus_umkehr.update(vor=self.chk_maus_vor.isChecked(), neigen=self.chk_maus_neigen.isChecked(),
+                             drehen=self.chk_maus_drehen.isChecked(),
+                             seite=truthy(cfg_get("3dmaus", "umkehr_seite")),
+                             hoch=truthy(cfg_get("3dmaus", "umkehr_hoch")))
+        if self._updating_ui:
+            return
+        cfg_set("3dmaus", "aktiv", self.chk_maus.isChecked())
+        cfg_set("3dmaus", "empfindlichkeit", f"{e:.1f}")
+        cfg_set("3dmaus", "umkehr_vor", self.chk_maus_vor.isChecked())
+        cfg_set("3dmaus", "umkehr_neigen", self.chk_maus_neigen.isChecked())
+        cfg_set("3dmaus", "umkehr_drehen", self.chk_maus_drehen.isChecked())
+        self.save_timer.start()
+
+    def _maus_anmelden(self):
+        if self._maus_angemeldet:
+            return
+        self._maus_angemeldet = True
+        if self.maus.registrieren(int(self.winId())):
+            log.info("3D-Maus: Raw Input angemeldet, Geräte: %s", ", ".join(self.maus.geraete) or "keine")
+        elif spacemouse.IST_WINDOWS:
+            log.warning("3D-Maus: %s", self.maus.fehler)
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        self._maus_anmelden()
+
+    def nativeEvent(self, eventType, message):
+        if self.maus.registriert:
+            try:
+                if bytes(eventType) == b"windows_generic_MSG":
+                    self.maus.verarbeite_nachricht(message)
+            except Exception:
+                pass
+        return super().nativeEvent(eventType, message)
+
+    def _poll_maus(self):
+        m = self.maus
+        if not spacemouse.IST_WINDOWS:
+            state, text = "idle", "NUR WINDOWS"
+        elif not m.registriert:
+            state, text = "lost", "FEHLER"
+        elif m.empfangen:
+            state, text = "ok", "AKTIV"
+        elif m.geraete:
+            state, text = "file", "GEFUNDEN"
+        else:
+            state, text = "idle", "NICHT GEFUNDEN"
+        if self.lbl_maus.property("state") != state:
+            self.lbl_maus.setProperty("state", state)
+            self.lbl_maus.style().unpolish(self.lbl_maus)
+            self.lbl_maus.style().polish(self.lbl_maus)
+        self.lbl_maus.setText(text)
+        if m.geraete:
+            self.lbl_maus.setToolTip("\n".join(m.geraete))
+        a = m.achsen(totzone=0.0)
+        self.lbl_maus_achsen.setText(f"T  {a[0]:+.2f} {a[1]:+.2f} {a[2]:+.2f}\nR  {a[3]:+.2f} {a[4]:+.2f} {a[5]:+.2f}")
+
     # ------------------------------------------------------- Raum laden/speichern
     def _raum_ordner(self):
         d = cfg_get("raum", "letzter_ordner")
@@ -1635,10 +1783,11 @@ class MainWindow(QMainWindow):
         if not path:
             return
         pos = transformieren(self.align, self.raum_pos)
+        nor = self.raum_nor @ self.align[:3, :3].T.astype(np.float32) if self.raum_nor is not None else None
         x, y, yaw = self._startpunkt()
         meta = {"start": f"{x:.3f} {y:.3f} {yaw:.1f}", "voxel": f"{self.raum_voxel:.3f}", "boden": "ja"}
         try:
-            raumscan.ply_schreiben(path, pos, self.raum_col, meta, f"{APP_NAME} v{APP_VERSION}")
+            raumscan.ply_schreiben(path, pos, self._raum_farben(pos), meta, f"{APP_NAME} v{APP_VERSION}", nor=nor)
             cfg_set("raum", "letzter_ordner", str(Path(path).parent))
             self.save_timer.start()
             self.flash(f"Raum gespeichert ({len(pos):,} Punkte): {path}".replace(",", "."))
@@ -1651,7 +1800,7 @@ class MainWindow(QMainWindow):
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            pos, col, meta = raumscan.ply_lesen(path)
+            pos, col, nor, meta = raumscan.ply_lesen(path)
         except Exception as exc:
             QApplication.restoreOverrideCursor()
             return QMessageBox.warning(self, APP_NAME, f"Datei konnte nicht geladen werden:\n{exc}")
@@ -1661,6 +1810,7 @@ class MainWindow(QMainWindow):
         if len(pos) > 6_000_000:
             sel = np.random.default_rng(0).choice(len(pos), 6_000_000, replace=False)
             pos, col = pos[sel], col[sel]
+            nor = nor[sel] if nor is not None else None
             self.flash("Sehr große Datei – auf 6 Mio. Punkte reduziert", warn=True)
         if self.raum.walk:
             self.btn_walk.setChecked(False)
@@ -1676,7 +1826,7 @@ class MainWindow(QMainWindow):
                                 0.005, 0.05)) if len(sub) else 0.02
         self.raum_quelle = "datei"
         self.raum_datei = path
-        self.raum_pos, self.raum_col, self.raum_meta = pos, col, meta
+        self.raum_pos, self.raum_col, self.raum_nor, self.raum_meta = pos, col, nor, meta
         self.raum_voxel = vox
         self.raum_bahn = np.zeros((0, 3), np.float32)
         cfg_set("raum", "letzter_ordner", str(Path(path).parent))

@@ -71,6 +71,16 @@ DEFAULTS = {
         "tempo_m_s": "1.4",
         "fuellung": "1.8",             # Größe der Punkte beim Begehen (× Voxelgröße)
         "letzter_ordner": "",
+        "farbe": "hoehe",              # Kartenfarbe: hoehe | grau (schattiert, ohne Farbkamera)
+    },
+    "3dmaus": {
+        "aktiv": "ja",                 # 3Dconnexion-3D-Maus beim Begehen verwenden
+        "empfindlichkeit": "1.0",
+        "umkehr_vor": "nein",          # Achsen einzeln umkehren: ja | nein
+        "umkehr_seite": "nein",
+        "umkehr_hoch": "nein",
+        "umkehr_neigen": "nein",
+        "umkehr_drehen": "nein",
     },
     "fenster": {
         "breite": "1480",
@@ -120,7 +130,7 @@ def cfg_save():
         "# RealSense-Viewer-MK2 – Konfiguration\n"
         "# Liegt neben der exe und kann mit jedem Texteditor bearbeitet werden.\n"
         "# Werte für ja/nein: ja | nein.  demo_modus: auto | ja | nein\n"
-        "# [raum] modus: gehen | fliegen.  voxel_cm: 1 | 2 | 3\n\n"
+        "# [raum] modus: gehen | fliegen.  voxel_cm: 1 | 2 | 3.  farbe: hoehe | grau\n\n"
     )
     with _cfg_lock:
         try:
@@ -215,6 +225,7 @@ class CameraWorker(threading.Thread):
         self.restart_flag = threading.Event()
         self.stop_flag = threading.Event()
         self.option_queue = []
+        self.nur_tiefe = False          # Raumscan: Farbsensor aus, nur Tiefe (funktioniert im Dunkeln)
         self.status = {
             "verbunden": False, "demo": False, "meldung": "Starte …", "geraet": {},
             "fps": 0.0, "aufloesung": "", "temperatur": None, "optionen": {},
@@ -232,6 +243,16 @@ class CameraWorker(threading.Thread):
     def stop(self):
         self.stop_flag.set()
         self.restart_flag.set()
+
+    def set_nur_tiefe(self, on):
+        """Für den Raumscan: Kamera ohne Farbstrom betreiben, IR-Projektor an. Startet die Kamera neu."""
+        on = bool(on)
+        if on != self.nur_tiefe:
+            self.nur_tiefe = on
+            with self.lock:
+                laeuft = self.status.get("verbunden")
+            if laeuft:
+                self.restart_flag.set()
 
     def queue_option(self, name, value):
         with self.lock:
@@ -363,7 +384,8 @@ class CameraWorker(threading.Thread):
 
         # 3) Bestes passendes Profil wählen und prüfen, ob das SDK es auflösen kann
         d_choice = choose_profile(depth_list, want_w, want_h, want_fps)
-        c_candidates = [c for c in color_list if c[2] == d_choice[2]]
+        nur_tiefe = self.nur_tiefe
+        c_candidates = [c for c in color_list if c[2] == d_choice[2]] if not nur_tiefe else []
         c_choice = choose_profile(c_candidates, d_choice[0], d_choice[1], d_choice[2], prefer_rgb=True) \
             if c_candidates else None
 
@@ -402,6 +424,13 @@ class CameraWorker(threading.Thread):
         if (d_choice[0], d_choice[1], d_choice[2]) != (want_w, want_h, want_fps):
             abweichung = f" – {want_w}x{want_h} @ {want_fps} nicht verfügbar, nutze {d_choice[0]}x{d_choice[1]} @ {d_choice[2]}"
         self._apply_initial_options(sensor)
+        if nur_tiefe:
+            # Im Dunkeln liefert die Stereo-Tiefe nur mit Projektor-Muster Werte
+            try:
+                if sensor.supports(rs.option.emitter_enabled):
+                    sensor.set_option(rs.option.emitter_enabled, 1.0)
+            except Exception as exc:
+                log.warning("Projektor für Raumscan: %s", exc)
 
         intr = profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
         align = rs.align(rs.stream.depth) if has_color else None
@@ -409,12 +438,15 @@ class CameraWorker(threading.Thread):
 
         hint = (" – Achtung: nur USB 2 erkannt" if geraet["usb"].startswith("2") else "") + abweichung
         self._set_status(verbunden=True, demo=False, geraet=geraet,
-                         aufloesung=f"{intr.width}x{intr.height} @ {fps} fps" + ("" if has_color else " (ohne Farbe)"),
+                         aufloesung=f"{intr.width}x{intr.height} @ {fps} fps" + (
+                             "" if has_color else (" (nur Tiefe – Raumscan)" if nur_tiefe else " (ohne Farbe)")),
                          meldung="Kamera läuft" + hint, optionen=self._read_options(sensor))
         last_temp = 0.0
         try:
             while not self.restart_flag.is_set():
                 self._process_option_queue(sensor)
+                if self.nur_tiefe != nur_tiefe:
+                    break
                 try:
                     frames = pipeline.wait_for_frames(3000)
                 except Exception as exc:
@@ -571,7 +603,7 @@ class CameraWorker(threading.Thread):
                 sfx, sfy = fx / step, fy / step
                 sppx, sppy = (ppx + 0.5) / step - 0.5, (ppy + 0.5) / step - 0.5
             self._tick_fps()
-            self._publish(np.ascontiguousarray(depth), np.ascontiguousarray(rgb),
+            self._publish(np.ascontiguousarray(depth), None if self.nur_tiefe else np.ascontiguousarray(rgb),
                           sfx, sfy, sppx, sppy, units, True)
             rest = 1 / 15 - (time.time() - t)
             if rest > 0:
