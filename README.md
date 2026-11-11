@@ -1,1 +1,157 @@
-# RealSense-D415-3D-Anzeige-MK2
+# RealSense-Viewer-MK2
+
+**Version 1.0.0** · reines Desktop-Programm für Windows (kein Browser, kein Webserver)
+
+Zeigt das 3D-Bild einer per USB angeschlossenen **Intel RealSense D415** live in einem eigenen Programmfenster an – im Design der Dashboards (dunkel, Amber/Teal). Neu in MK2: **Raumscan**. Man trägt die Kamera durch den Raum, das Programm setzt alle Bilder zu einer zusammenhängenden 3D-Karte zusammen – und durch diese Karte kann man anschließend **wie in einem virtuellen Raum gehen und sich umsehen**.
+
+![RealSense-Viewer-MK2 – Begehen eines gescannten Raums (Demo-Raum) mit Minikarte](docs/screenshot.png)
+
+*Begehen-Modus im eingebauten Demo-Raum: Ich-Perspektive in Augenhöhe, rechts oben die Minikarte mit eigener Position und Blickrichtung.*
+
+## Raumscan und Begehen (neu in MK2)
+
+1. Reiter **RAUM** öffnen (Taste 5) und **SCAN STARTEN** drücken.
+2. Kamera **langsam** schwenken und durch den Raum tragen, Abstand zu den Flächen 0,5–3 m. Rechts oben läuft das Live-Bild mit, die Karte wächst mit; die türkise Linie zeigt den bisherigen Weg der Kamera.
+3. Erscheint **TRACKING VERLOREN**, zur zuletzt erfassten Stelle zurückkehren und dorthin zielen – das Programm findet sich dann selbst wieder.
+4. **SCAN PAUSIEREN**, dann **RAUM BEGEHEN** (Taste B). Der Boden wird automatisch erkannt und waagerecht ausgerichtet, man steht in Augenhöhe am Startpunkt des Scans.
+
+### Steuerung beim Begehen
+
+| Eingabe | Funktion |
+|---|---|
+| W A S D / Pfeil hoch, runter | gehen, seitwärts gehen |
+| Pfeil links / rechts | drehen |
+| Maus ziehen (linke Taste) | umsehen |
+| Mausrad | Schritt vor / zurück |
+| Umschalt (gedrückt halten) | schneller |
+| Q / E | runter / hoch (im Modus Fliegen) |
+| F | zwischen **Gehen** und **Fliegen** wechseln |
+| R | zurück zum Startpunkt |
+| Esc | Begehen beenden |
+
+- **Gehen:** feste Augenhöhe über dem Boden; mit „Wände und Möbel blockieren“ kann man nicht durch gescannte Hindernisse laufen, man gleitet an ihnen entlang.
+- **Fliegen:** frei in alle Richtungen, auch durch Wände und über Möbel.
+- **Augenhöhe, Gehtempo, Flächenfüllung** sind in der Seitenleiste einstellbar. Die Flächenfüllung macht die Punkte beim Begehen größer, damit Wände geschlossen wirken.
+- **Minikarte** rechts oben: Grundriss aus dem Scan, Amber-Pfeil = eigene Position und Blickrichtung, türkiser Punkt = Startpunkt.
+
+### Raum speichern und laden
+
+- **SPEICHERN** (Strg+Umschalt+S) legt den Raum als PLY-Punktwolke ab – bereits am Boden ausgerichtet, mit Startpunkt. Die Datei lässt sich auch in MeshLab, CloudCompare oder Blender öffnen.
+- **LADEN** (Strg+O) öffnet einen gespeicherten Raum zum Begehen – dafür muss keine Kamera angeschlossen sein. Auch andere PLY-Dateien (z. B. Einzelbilder aus *Punktwolke speichern*) lassen sich laden.
+- **Punktabstand der Karte:** 1 cm (fein, mehr Speicher), 2 cm (Standard) oder 3 cm (große Räume). Gilt ab dem nächsten Scan (**NEU**).
+
+### Ohne Kamera ausprobieren
+
+Ist keine D415 angeschlossen, liefert das Programm einen **Demo-Raum**: ein möbliertes Zimmer, durch das eine virtuelle Kamera langsam geht. Damit lassen sich Scan, Speichern und Begehen vollständig testen.
+
+### So funktioniert der Scan
+
+Jedes Tiefenbild wird per ICP (Punkt-zu-Ebene, grob-nach-fein) an ein Schlüsselbild angelegt, unterstützt durch einen Helligkeitsterm aus dem Farbbild. Daraus ergibt sich die Bahn der Kamera, mit der die Punkte in eine gemeinsame Voxel-Karte eingetragen und gemittelt werden. Alles läuft in einem eigenen Thread, ohne zusätzliche Bibliotheken (nur numpy). Die D415 hat keinen Bewegungssensor – wie gut der Scan wird, hängt daher von Struktur im Bild ab: Möbel, Kanten und Muster helfen, eine einzelne glatte weiße Wand in Nahaufnahme nicht.
+
+## Weitere Funktionen (aus MK1)
+
+- **3D-Punktwolke** in OpenGL: linke Maustaste drehen, mittlere Maustaste verschieben, Mausrad zoomen
+- Ansichten: **3D · Tiefe · Farbe · Geteilt · Raum** (Tasten 1–5)
+- Punktfarbe: echtes **RGB** der Kamera, **Tiefen-Farbskala** (mit Legende), Amber oder Teal
+- Distanzbereich (min./max.), Punktgröße, Punktabstand (1–4 Pixel), Bodenraster, Kamerasymbol mit Sichtkegel
+- Blickwinkel: Kamera, Schräg, Oben, Seite
+- Kamera: Auflösung (bis 1280×720), Bildrate, IR-Projektor an/aus, Laserleistung, Preset (z. B. High Accuracy / High Density)
+- Filter des RealSense-SDK: räumliche und zeitliche Glättung, Löcher füllen
+- Geräteinfo: Modell, Seriennummer, Firmware, USB-Typ (Warnung bei USB 2), Temperatur, FPS
+- Tiefenbild: Mauszeiger zeigt die Entfernung des Pixels in Metern
+- Einzelbild als **PLY** speichern, Bild als PNG, Einfrieren
+- Dunkle Windows-Titelleiste, Fenstergröße wird gemerkt
+- Alle Einstellungen in der menschenlesbaren **config.ini** neben der exe
+
+### Tastenkürzel
+
+| Taste | Funktion |
+|---|---|
+| 1 / 2 / 3 / 4 / 5 | Ansicht 3D / Tiefe / Farbe / Geteilt / Raum |
+| B | Raum begehen an/aus |
+| Strg+O | Raum laden |
+| Strg+Umschalt+S | Raum speichern |
+| Leertaste | Einfrieren / Fortsetzen |
+| Strg+S | Einzelbild-Punktwolke als PLY speichern |
+| Strg+P | Bild als PNG speichern (auch aus der Raumansicht) |
+| F11 | Vollbild |
+
+## Benutzung (Windows 10/11)
+
+1. Zip entpacken, `RealSense-Viewer-MK2.exe` starten (der erste Start dauert einige Sekunden, weil die exe sich entpackt).
+2. Die D415 an einen **USB-3-Port** anschließen. An USB 2 funktionieren nur kleine Auflösungen.
+
+Ein separater Treiber ist nicht nötig – die RealSense-Bibliothek steckt in der exe. Wird die Kamera nicht erkannt: Kabel/Port wechseln, andere Programme schließen, die die Kamera benutzen (z. B. Intel RealSense Viewer), dann **„Kamera neu verbinden“** klicken.
+
+Probleme werden in `realsense-viewer.log` neben der exe protokolliert – dort stehen auch alle Formate, die die Kamera anbietet, und welches gewählt wurde.
+
+### Kamera wird erkannt, aber kein Bild
+
+- **USB 2 statt USB 3:** Im Feld *USB* steht dann `2.x`. Die D415 schafft an USB 2 nur kleine Auflösungen (z. B. 640×480 @ 30). Das Programm wählt automatisch ein passendes Format; für volle Auflösung einen USB-3-Port (blau / SS) und ein USB-3-fähiges Kabel nutzen – viele USB-C-Kabel sind nur USB 2.
+- **Windows-Datenschutz:** *Einstellungen → Datenschutz & Sicherheit → Kamera* → „Kamerazugriff“ und „Desktop-Apps den Zugriff auf die Kamera erlauben“ einschalten.
+- **Kamera belegt:** Intel RealSense Viewer, Teams, OBS o. Ä. schließen.
+
+### Tipps für einen guten Raumscan
+
+- Langsam bewegen – lieber drehen als schnell gehen. Die Anzeige *Tracking* in der Seitenleiste zeigt Bilder pro Sekunde und die Übereinstimmung in Prozent.
+- Farbstrom eingeschaltet lassen (Standard): Er stabilisiert das Tracking vor glatten Flächen.
+- Glättung (räumlich/zeitlich) eingeschaltet lassen; *Max. Distanz* hat keinen Einfluss auf den Scan (dieser nutzt 0,2–3,5 m).
+- Den Boden mit erfassen (Kamera leicht nach unten neigen) – sonst kann die Augenhöhe beim Begehen nur geschätzt werden.
+
+## config.ini
+
+Wird beim ersten Start neben der exe angelegt.
+
+| Abschnitt | Schlüssel | Bedeutung |
+|---|---|---|
+| `[kamera]` | `aufloesung`, `fps` | z. B. `848x480`, `30` |
+| `[kamera]` | `seriennummer` | leer = erste Kamera, sonst bestimmte Kamera |
+| `[kamera]` | `demo_modus` | `auto` (Demo-Raum ohne Kamera), `nein`, `ja` |
+| `[kamera]` | `laser`, `laserleistung`, `preset` | Projektor-Einstellungen |
+| `[verarbeitung]` | `punktabstand` | 1 = jeder Pixel, 2 = jeder zweite … |
+| `[verarbeitung]` | `min_distanz_m`, `max_distanz_m` | angezeigter Tiefenbereich |
+| `[ansicht]` | `farbmodus`, `punktgroesse`, `ansicht` | Darstellung |
+| `[raum]` | `voxel_cm` | Punktabstand der Raumkarte: `1`, `2`, `3` |
+| `[raum]` | `modus`, `kollision` | `gehen` / `fliegen`, Hindernisse `ja` / `nein` |
+| `[raum]` | `augenhoehe_m`, `tempo_m_s`, `fuellung` | Begehen |
+| `[fenster]` | `breite`, `hoehe`, `maximiert` | Fenster |
+
+## Bauen per GitHub Actions
+
+1. Inhalt dieser Zip in ein GitHub-Repository hochladen (inkl. Ordner `.github`).
+2. Bei jedem Push auf `main`/`master` baut der Workflow **Build Windows EXE** die exe mit PyInstaller, startet sie mit `--selbsttest` (prüft dabei auch den Raumscan am Demo-Raum) und stellt sie als Artefakt bereit (Reiter *Actions* → Lauf → *Artifacts*).
+3. Für ein Release einen Tag setzen, z. B. `git tag v1.0.0 && git push --tags` – dann erscheint die fertige Zip unter *Releases*.
+
+Die Versionsnummer steht in `app.py` (`APP_VERSION`) und wird automatisch in exe-Eigenschaften, Zip-Namen und Fenster übernommen.
+
+## Lokal starten (ohne exe)
+
+```bash
+pip install -r requirements.txt
+python app.py
+```
+
+`python app.py --selbsttest` prüft, ob alle Bestandteile vorhanden sind.
+
+## Ordnerstruktur
+
+```
+RealSense-Viewer-MK2/
+├── app.py                      Programmfenster (PySide6/Qt + pyqtgraph-OpenGL)
+├── kamera.py                   Kamera-Thread, Demo-Raum-Anbindung, config.ini
+├── raumscan.py                 Tracking (ICP), Voxel-Karte, Bodenerkennung, Hindernisse, PLY
+├── raumansicht.py              begehbare 3D-Ansicht (Ich-Perspektive, Minikarte)
+├── demoraum.py                 möbliertes Demo-Zimmer für Tests ohne Kamera
+├── requirements.txt
+├── assets/                     icon.ico, icon.png, logo.svg, pfeil.png
+├── docs/screenshot.png         Bild für diese README
+├── build/make_version_info.py  Versionsressource für die exe
+└── .github/workflows/build-exe.yml
+```
+
+## Hinweise
+
+- PLY-Export Einzelbild: Einheit Meter, Z zeigt nach oben, die Kamera sitzt im Ursprung und blickt in +Y-Richtung.
+- PLY-Export Raum: Einheit Meter, Z nach oben, Boden bei Z = 0, Startpunkt im Ursprung.
+- Bei 1280×720 mit Punktabstand 1 sind es bis zu 920.000 Punkte – auf schwächeren Grafikkarten Punktabstand 2 wählen. Der Raumscan rechnet unabhängig davon intern mit etwa 320 Pixel Breite.
+- Ein großer Raum mit 1-cm-Raster kann mehrere Millionen Punkte haben; dann eher 2 cm wählen.

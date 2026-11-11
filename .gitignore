@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+build/version_info.txt
+build/*/
+dist/
+release/
+*.spec
+config.ini
+selbsttest.txt
+realsense-viewer.log
+*.ply

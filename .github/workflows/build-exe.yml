@@ -1,0 +1,88 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Code holen
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Abhängigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Versionsnummer und Versionsressource
+        id: ver
+        shell: bash
+        run: python build/make_version_info.py >> "$GITHUB_OUTPUT"
+
+      - name: EXE bauen (PyInstaller, Desktop-Fenster ohne Konsole)
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --name RealSense-Viewer-MK2
+          --icon assets/icon.ico
+          --version-file build/version_info.txt
+          --add-data "assets;assets"
+          --collect-all pyrealsense2
+          --collect-submodules OpenGL
+          --hidden-import pyqtgraph.opengl
+          --hidden-import demoraum
+          --exclude-module tkinter
+          --exclude-module pkg_resources
+          --exclude-module pyqtgraph.examples
+          --exclude-module PySide6.QtWebEngineCore
+          --exclude-module PySide6.QtWebEngineWidgets
+          --exclude-module PySide6.Qt3DCore
+          --exclude-module PySide6.QtQuick
+          --exclude-module PySide6.QtQml
+          --exclude-module PySide6.QtMultimedia
+          app.py
+
+      - name: Selbsttest der EXE
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\RealSense-Viewer-MK2.exe" -ArgumentList "--selbsttest" -Wait -PassThru
+          if (Test-Path "dist\selbsttest.txt") { Get-Content "dist\selbsttest.txt" }
+          if ($p.ExitCode -ne 0) { Write-Error "Selbsttest fehlgeschlagen (Exit $($p.ExitCode))"; exit 1 }
+          Remove-Item "dist\selbsttest.txt", "dist\config.ini", "dist\realsense-viewer.log" -ErrorAction SilentlyContinue
+
+      - name: Paket schnüren
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $dir = "release/RealSense-Viewer-MK2_v$v"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item dist/RealSense-Viewer-MK2.exe $dir/
+          Copy-Item README.md $dir/
+          Copy-Item CHANGELOG.md $dir/
+          Compress-Archive -Path "$dir/*" -DestinationPath "release/RealSense-Viewer-MK2_v${v}_Windows.zip" -Force
+
+      - name: Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealSense-Viewer-MK2_v${{ steps.ver.outputs.version }}_Windows
+          path: release/RealSense-Viewer-MK2_v${{ steps.ver.outputs.version }}/
+
+      - name: GitHub-Release (nur bei Tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: RealSense-Viewer-MK2 v${{ steps.ver.outputs.version }}
+          files: release/*.zip
