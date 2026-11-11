@@ -1,6 +1,6 @@
 # RealSense-Viewer-MK2
 
-**Version 1.2.0** · reines Desktop-Programm für Windows (kein Browser, kein Webserver)
+**Version 1.3.0** · reines Desktop-Programm für Windows und macOS auf Apple Silicon (kein Browser, kein Webserver)
 
 Zeigt das 3D-Bild einer per USB angeschlossenen **Intel RealSense D415** live in einem eigenen Programmfenster an – im Design der Dashboards (dunkel, Amber/Teal). Neu in MK2: **Raumscan**. Man trägt die Kamera durch den Raum, das Programm setzt alle Bilder zu einer zusammenhängenden 3D-Karte zusammen – und durch diese Karte kann man anschließend **wie in einem virtuellen Raum gehen und sich umsehen** – mit Tastatur und Maus oder mit einer **3Dconnexion-3D-Maus**. Der Scan nutzt **nur die Tiefenkameras** (Stereo-IR) und funktioniert daher auch in **völliger Dunkelheit**.
 
@@ -101,6 +101,17 @@ Jedes Tiefenbild wird per ICP (Punkt-zu-Ebene, grob-nach-fein) an ein Schlüssel
 | Strg+P | Bild als PNG speichern (auch aus der Raumansicht) |
 | F11 | Vollbild |
 
+## Seitenleiste je Ansicht
+
+Die Seitenleiste zeigt nur die Einstellungen, die in der gerade gewählten Ansicht etwas bewirken:
+
+| Ansicht | Panels |
+|---|---|
+| 3D, Geteilt | Gerät, Kamera, Verarbeitung, Darstellung, Aufnahme, System |
+| Tiefe | Gerät, Kamera, Verarbeitung, Aufnahme (ohne Darstellung) |
+| Farbe | Gerät, Kamera (ohne Projektor/Preset), Verarbeitung (nur Punktabstand), Aufnahme (Einfrieren, PNG) |
+| Raum | Gerät, Raumscan, Begehen, 3D-Maus (Windows), Kamera, Verarbeitung (ohne Distanzbereich), Darstellung (Punktgröße, Bodenraster), Aufnahme (PNG) |
+
 ## Benutzung (Windows 10/11)
 
 1. Zip entpacken, `RealSense-Viewer-MK2.exe` starten (der erste Start dauert einige Sekunden, weil die exe sich entpackt).
@@ -124,9 +135,20 @@ Probleme werden in `realsense-viewer.log` neben der exe protokolliert – dort s
 - Glättung (räumlich/zeitlich) eingeschaltet lassen; *Max. Distanz* hat keinen Einfluss auf den Scan (dieser nutzt 0,2–3,5 m).
 - Den Boden mit erfassen (Kamera leicht nach unten neigen) – sonst kann die Augenhöhe beim Begehen nur geschätzt werden.
 
+## Benutzung (macOS, Apple Silicon)
+
+1. `RealSense-Viewer-MK2_v…_Mac-AppleSilicon.zip` entpacken und `RealSense-Viewer-MK2.app` in den Programme-Ordner ziehen.
+2. Die App ist nicht von Apple beglaubigt. Beim ersten Start daher **Rechtsklick → Öffnen**. Meldet macOS „beschädigt“, einmal im Terminal ausführen:
+   `xattr -dr com.apple.quarantine /Applications/RealSense-Viewer-MK2.app`
+3. config.ini, Protokoll und Selbsttest liegen unter `~/Library/Application Support/RealSense-Viewer-MK2/` (Knopf *DATENORDNER ÖFFNEN*).
+4. **Kamera unter macOS:** Die RealSense-Bibliothek greift direkt per USB auf die D415 zu; auf neueren macOS-Versionen klappt das oft nur mit Administratorrechten. Wird die Kamera nicht erkannt, die App aus dem Terminal starten:
+   `sudo /Applications/RealSense-Viewer-MK2.app/Contents/MacOS/RealSense-Viewer-MK2`
+   Ohne Kamera läuft der Demo-Raum; gespeicherte Räume lassen sich jederzeit laden und begehen.
+5. Die 3D-Maus-Unterstützung gibt es nur unter Windows; das Panel 3D-MAUS ist auf dem Mac ausgeblendet.
+
 ## config.ini
 
-Wird beim ersten Start neben der exe angelegt.
+Wird beim ersten Start neben der exe angelegt (Mac: im Datenordner, siehe oben).
 
 | Abschnitt | Schlüssel | Bedeutung |
 |---|---|---|
@@ -148,8 +170,12 @@ Wird beim ersten Start neben der exe angelegt.
 ## Bauen per GitHub Actions
 
 1. Inhalt dieser Zip in ein GitHub-Repository hochladen (inkl. Ordner `.github`).
-2. Bei jedem Push auf `main`/`master` baut der Workflow **Build Windows EXE** die exe mit PyInstaller, startet sie mit `--selbsttest` (prüft dabei auch den Raumscan am Demo-Raum und die 3D-Maus-Auswertung) und stellt sie als Artefakt bereit (Reiter *Actions* → Lauf → *Artifacts*).
-3. Für ein Release einen Tag setzen, z. B. `git tag v1.2.0 && git push --tags` – dann erscheint die fertige Zip unter *Releases*.
+2. Bei jedem Push auf `main`/`master` baut der Workflow **Build Windows EXE und Mac-App (Apple Silicon)** parallel
+   - die Windows-exe (`windows-latest`) und
+   - die Mac-App für Apple Silicon/arm64 (`macos-14`, App-Paket mit Symbol und Versionsnummer, ad hoc signiert),
+
+   startet beide mit `--selbsttest` (prüft dabei auch den Raumscan am Demo-Raum und die 3D-Maus-Auswertung) und stellt sie als Artefakte bereit (Reiter *Actions* → Lauf → *Artifacts*).
+3. Für ein Release einen Tag setzen, z. B. `git tag v1.3.0 && git push --tags` – dann erscheinen `…_Windows.zip` und `…_Mac-AppleSilicon.zip` unter *Releases*.
 
 Die Versionsnummer steht in `app.py` (`APP_VERSION`) und wird automatisch in exe-Eigenschaften, Zip-Namen und Fenster übernommen.
 

@@ -28,6 +28,11 @@ log = logging.getLogger("RealSense-Viewer-MK2")
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
     RES_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR))
+    if sys.platform == "darwin":
+        # In einer Mac-App darf nicht ins Programmpaket geschrieben werden:
+        # config.ini, Protokoll und Selbsttest liegen im Benutzerordner
+        BASE_DIR = Path.home() / "Library" / "Application Support" / "RealSense-Viewer-MK2"
+        BASE_DIR.mkdir(parents=True, exist_ok=True)
 else:
     BASE_DIR = Path(__file__).resolve().parent
     RES_DIR = BASE_DIR

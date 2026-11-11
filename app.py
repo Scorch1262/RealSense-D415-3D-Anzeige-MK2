@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "RealSense-Viewer-MK2"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 
 import numpy as np  # noqa: E402
 
@@ -336,6 +336,19 @@ class Panel(QFrame):
         return w
 
 
+def gruppe(panel):
+    """Unsichtbarer Behälter in einem Panel, damit mehrere Zeilen gemeinsam ein-/ausgeblendet werden."""
+    w = QWidget()
+    lay = QVBoxLayout(w)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(9)
+    panel.add(w)
+    return w, lay
+
+
+ALLE_ANSICHTEN = ("3d", "tiefe", "farbe", "geteilt", "raum")
+
+
 def field_header(text):
     row = QHBoxLayout()
     l = QLabel(text)
@@ -644,6 +657,12 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(inner)
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(12)
+        # Welche Panels/Einstellungen in welcher Ansicht etwas bewirken
+        self._sichtbar = []
+
+        def nur(w, *ansichten):
+            self._sichtbar.append((w, set(ansichten)))
+            return w
 
         # GERÄT
         p = Panel("GERÄT")
@@ -665,7 +684,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(p)
 
         # RAUMSCAN
-        p = Panel("RAUMSCAN")
+        p = nur(Panel("RAUMSCAN"), "raum")
         row = QHBoxLayout()
         row.addWidget(make_label("Zustand", "kvKey"))
         row.addStretch()
@@ -713,7 +732,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(p)
 
         # BEGEHEN
-        p = Panel("BEGEHEN")
+        p = nur(Panel("BEGEHEN"), "raum")
         self.btn_walk = p.add(make_button("RAUM BEGEHEN", "btnAccent", checkable=True))
         self.seg_walkmode = p.add(Segmented([("gehen", "GEHEN"), ("fliegen", "FLIEGEN")]))
         self.chk_kollision = p.add(Toggle("Wände und Möbel blockieren"))
@@ -737,8 +756,8 @@ class MainWindow(QMainWindow):
         p.add(hint)
         lay.addWidget(p)
 
-        # 3D-MAUS
-        p = Panel("3D-MAUS")
+        # 3D-MAUS (nur unter Windows verfügbar)
+        p = nur(Panel("3D-MAUS"), *(("raum",) if spacemouse.IST_WINDOWS else ()))
         row = QHBoxLayout()
         row.addWidget(make_label("Gerät", "kvKey"))
         row.addStretch()
@@ -793,6 +812,8 @@ class MainWindow(QMainWindow):
         self.sel_preset = QComboBox()
         co.addWidget(self.sel_preset)
         p.add(self.cam_opts)
+        # Projektor und Preset betreffen nur die Tiefe, nicht das Farbbild
+        nur(self.cam_opts, "3d", "tiefe", "geteilt", "raum")
         self.cam_hint = p.add(make_label("Optionen nur mit angeschlossener Kamera.", "hint"))
         self.btn_restart = p.add(make_button("KAMERA NEU VERBINDEN"))
         lay.addWidget(p)
@@ -801,45 +822,64 @@ class MainWindow(QMainWindow):
         p = Panel("VERARBEITUNG")
         p.add(make_label("Punktabstand (Pixel)", "fieldLabel"))
         self.seg_step = p.add(Segmented([(str(i), str(i)) for i in (1, 2, 3, 4)]))
-        self.chk_spatial = p.add(Toggle("Glättung (räumlich)"))
-        self.chk_temporal = p.add(Toggle("Glättung (zeitlich)"))
-        self.chk_holes = p.add(Toggle("Löcher füllen"))
+        # Tiefenfilter: wirken auf 3D, Tiefenbild und Raumscan – nicht auf das Farbbild
+        w, g = gruppe(p)
+        nur(w, "3d", "tiefe", "geteilt", "raum")
+        self.chk_spatial = Toggle("Glättung (räumlich)")
+        self.chk_temporal = Toggle("Glättung (zeitlich)")
+        self.chk_holes = Toggle("Löcher füllen")
+        for t in (self.chk_spatial, self.chk_temporal, self.chk_holes):
+            g.addWidget(t)
+        # Distanzbereich: nur Anzeige (der Raumscan nutzt fest 0,2–3,5 m)
+        w, g = gruppe(p)
+        nur(w, "3d", "tiefe", "geteilt")
         row, self.lbl_min = field_header("Min. Distanz")
-        p.add(row)
-        self.rng_min = p.add(QSlider(Qt.Horizontal))
+        g.addLayout(row)
+        self.rng_min = QSlider(Qt.Horizontal)
         self.rng_min.setRange(0, 300)          # cm
+        g.addWidget(self.rng_min)
         row, self.lbl_max = field_header("Max. Distanz")
-        p.add(row)
-        self.rng_max = p.add(QSlider(Qt.Horizontal))
+        g.addLayout(row)
+        self.rng_max = QSlider(Qt.Horizontal)
         self.rng_max.setRange(3, 100)          # dm
+        g.addWidget(self.rng_max)
         lay.addWidget(p)
 
         # DARSTELLUNG
-        p = Panel("DARSTELLUNG")
-        p.add(make_label("Punktfarbe", "fieldLabel"))
-        self.seg_color = p.add(Segmented([("rgb", "RGB"), ("tiefe", "TIEFE"), ("amber", "AMBER"), ("teal", "TEAL")]))
+        p = nur(Panel("DARSTELLUNG"), "3d", "geteilt", "raum")
+        w, g = gruppe(p)
+        nur(w, "3d", "geteilt")
+        g.addWidget(make_label("Punktfarbe", "fieldLabel"))
+        self.seg_color = Segmented([("rgb", "RGB"), ("tiefe", "TIEFE"), ("amber", "AMBER"), ("teal", "TEAL")])
+        g.addWidget(self.seg_color)
         row, self.lbl_size = field_header("Punktgröße")
         p.add(row)
         self.rng_size = p.add(QSlider(Qt.Horizontal))
         self.rng_size.setRange(1, 16)          # halbe Pixel
         self.chk_grid = p.add(Toggle("Bodenraster"))
-        self.chk_axes = p.add(Toggle("Kamera & Achsen"))
-        p.add(make_label("Blickwinkel", "fieldLabel"))
-        self.seg_cam = p.add(Segmented([("kamera", "KAMERA"), ("schraeg", "SCHRÄG"), ("oben", "OBEN"), ("seite", "SEITE")]))
+        w, g = gruppe(p)
+        nur(w, "3d", "geteilt")
+        self.chk_axes = Toggle("Kamera & Achsen")
+        g.addWidget(self.chk_axes)
+        g.addWidget(make_label("Blickwinkel", "fieldLabel"))
+        self.seg_cam = Segmented([("kamera", "KAMERA"), ("schraeg", "SCHRÄG"), ("oben", "OBEN"), ("seite", "SEITE")])
+        g.addWidget(self.seg_cam)
         lay.addWidget(p)
 
         # AUFNAHME
         p = Panel("AUFNAHME")
         row = QHBoxLayout()
         row.setSpacing(8)
-        self.btn_freeze = make_button("EINFRIEREN", checkable=True)
+        self.btn_freeze = nur(make_button("EINFRIEREN", checkable=True), "3d", "tiefe", "farbe", "geteilt")
         self.btn_shot = make_button("BILD (PNG)")
         row.addWidget(self.btn_freeze)
         row.addWidget(self.btn_shot)
         p.add(row)
-        self.btn_ply = p.add(make_button("PUNKTWOLKE SPEICHERN (PLY)", "btnAccent"))
-        p.add(make_label("Leertaste: Einfrieren · Strg+S: PLY · F11: Vollbild", "hint"))
-        hint = p.add(make_label("Raum: Strg+O laden · Strg+Umschalt+S speichern · B begehen", "hint"))
+        self.btn_ply = nur(p.add(make_button("PUNKTWOLKE SPEICHERN (PLY)", "btnAccent")), "3d", "tiefe", "geteilt")
+        nur(p.add(make_label("Leertaste: Einfrieren · Strg+S: PLY · F11: Vollbild", "hint")),
+            "3d", "tiefe", "farbe", "geteilt")
+        hint = nur(p.add(make_label("Raum: Strg+O laden · Strg+Umschalt+S speichern · B begehen · F11: Vollbild",
+                                    "hint")), "raum")
         hint.setWordWrap(True)
         hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         lay.addWidget(p)
@@ -851,7 +891,7 @@ class MainWindow(QMainWindow):
         cfg_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         cfg_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         p.add(cfg_lbl)
-        self.btn_folder = p.add(make_button("PROGRAMMORDNER ÖFFNEN"))
+        self.btn_folder = p.add(make_button("DATENORDNER ÖFFNEN" if sys.platform == "darwin" else "PROGRAMMORDNER ÖFFNEN"))
         lay.addWidget(p)
         lay.addStretch()
 
@@ -1185,6 +1225,9 @@ class MainWindow(QMainWindow):
             self.btn_walk.setChecked(False)
         self.view = v
         self.tabs.set_value(v)
+        # Seitenleiste: nur Einstellungen zeigen, die in dieser Ansicht etwas bewirken
+        for w, ansichten in self._sichtbar:
+            w.setVisible(v in ansichten)
         g = self.stage_grid
         for w in (self.pane3d, self.pane_depth, self.pane_color, self.pane_raum):
             g.removeWidget(w)
@@ -1375,7 +1418,7 @@ class MainWindow(QMainWindow):
         o = st.get("optionen") or {}
         has = bool(st["verbunden"] and o)
         self.cam_opts.setEnabled(has)
-        self.cam_hint.setVisible(not has)
+        self.cam_hint.setVisible(not has and self.view != "farbe")
         sig = repr(sorted(o.items())) if has else None
         if has and sig != self._opt_sig and not self.rng_laser.isSliderDown():
             self._opt_sig = sig

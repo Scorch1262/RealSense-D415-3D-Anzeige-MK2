@@ -1,5 +1,15 @@
 # Änderungen
 
+## MK2 1.3.0
+- **Seitenleiste je Ansicht:** Es werden nur noch Panels und Einstellungen gezeigt, die in der gewählten
+  Ansicht etwas bewirken (z. B. Raumscan/Begehen/3D-Maus nur im RAUM, Darstellung nicht bei Tiefe/Farbe,
+  Distanzbereich nicht im RAUM, Projektor/Preset nicht bei FARBE)
+- **Mac-App für Apple Silicon (arm64)** im GitHub-Actions-Workflow: eigener Job auf `macos-14`,
+  App-Paket mit icns-Symbol, Versionsnummer, ad-hoc-Signatur, Selbsttest und Zip
+  (`…_Mac-AppleSilicon.zip`), bei Tags auch im Release
+- macOS: pyrealsense2 über das Paket `pyrealsense2-macosx`; config.ini, Protokoll und Selbsttest im
+  Benutzerordner `~/Library/Application Support/RealSense-Viewer-MK2`; 3D-MAUS-Panel ausgeblendet
+
 ## MK2 1.2.0
 - **Wiederfinden nach Tracking-Abbruch neu:** Statt nur in der Nähe der letzten (veralteten) Position zu
   suchen, werden alle früheren Schlüsselbilder über einen Tiefen-Fingerabdruck verglichen; die ähnlichsten
