@@ -22,17 +22,15 @@ except Exception as exc:  # pragma: no cover
 
 log = logging.getLogger("RealSense-Viewer-MK2")
 
+# Sicherer Modus nach Fehlern: Stufe 1 = ohne Farbe, 2 = 640x480 @ 15, 3 = 424x240 @ 15
+SICHERE_STUFEN = {2: (640, 480, 15), 3: (424, 240, 15)}
+
 # --------------------------------------------------------------------------
 # Pfade
 # --------------------------------------------------------------------------
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
     RES_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR))
-    if sys.platform == "darwin":
-        # In einer Mac-App darf nicht ins Programmpaket geschrieben werden:
-        # config.ini, Protokoll und Selbsttest liegen im Benutzerordner
-        BASE_DIR = Path.home() / "Library" / "Application Support" / "RealSense-Viewer-MK2"
-        BASE_DIR.mkdir(parents=True, exist_ok=True)
 else:
     BASE_DIR = Path(__file__).resolve().parent
     RES_DIR = BASE_DIR
@@ -243,6 +241,7 @@ class CameraWorker(threading.Thread):
 
     # ---------------- Schnittstelle für die Oberfläche ----------------
     def request_restart(self):
+        self._fehler_stufe = 0          # neue Einstellungen des Nutzers: wieder normal versuchen
         self.restart_flag.set()
 
     def stop(self):
@@ -344,7 +343,45 @@ class CameraWorker(threading.Thread):
                 self._set_status(verbunden=False, demo=False, meldung=f"Kamerafehler: {exc}")
                 with self.lock:
                     self.frame = None
-                self._idle(3.0)
+                if self.stop_flag.is_set():
+                    break
+                # Kamera hängt oft in einem halben Zustand ("failed to set power state",
+                # keine Bilder): per Hardware-Reset neu anmelden und sparsamer starten
+                text = str(exc).lower()
+                haengt = any(k in text for k in ("power state", "keine bilder", "nicht öffnen", "timed out",
+                                                  "didn't arrive", "resolve the request", "xu"))
+                if haengt:
+                    self._fehler_stufe = min(getattr(self, "_fehler_stufe", 0) + 1, 3)
+                    self._zuruecksetzen()
+                    self._idle(1.0)
+                else:
+                    self._idle(3.0)
+
+    def _zuruecksetzen(self):
+        """Hardware-Reset der Kamera und warten, bis sie sich wieder am USB anmeldet."""
+        sn = getattr(self, "_letzte_sn", "")
+        try:
+            for d in rs.context().query_devices():
+                if not sn or _info(d, rs.camera_info.serial_number) == sn:
+                    log.info("Kamera wird zurückgesetzt (sicherer Modus Stufe %d)", self._fehler_stufe)
+                    self._set_status(meldung="Kamera wird zurückgesetzt …")
+                    d.hardware_reset()
+                    break
+            else:
+                return
+        except Exception as exc:
+            log.warning("Hardware-Reset: %s", exc)
+            return
+        self._idle(3.0)                              # Kamera meldet sich ab …
+        ende = time.time() + 15
+        while time.time() < ende and not self.stop_flag.is_set():
+            try:
+                if len(rs.context().query_devices()) > 0:   # … und wieder an
+                    break
+            except Exception:
+                pass
+            time.sleep(0.5)
+        self._idle(1.5)
 
     # ---------------- echte Kamera ----------------
     def _run_camera(self):
@@ -353,6 +390,11 @@ class CameraWorker(threading.Thread):
         except Exception:
             want_w, want_h = 848, 480
         want_fps = int(float(cfg_get("kamera", "fps") or 30))
+        stufe = getattr(self, "_fehler_stufe", 0)
+        if stufe in SICHERE_STUFEN:
+            sw, sh, sf = SICHERE_STUFEN[stufe]
+            if sw * sh < want_w * want_h or sf < want_fps:
+                want_w, want_h, want_fps = sw, sh, min(sf, want_fps)
         serial_cfg = cfg_get("kamera", "seriennummer").strip()
 
         # 1) Gerät auswählen und Infos lesen (auch wenn der Start später scheitert)
@@ -372,6 +414,7 @@ class CameraWorker(threading.Thread):
         }
         self._set_status(geraet=geraet)
         serial = geraet["seriennummer"]
+        self._letzte_sn = serial
 
         # 2) Tatsächlich angebotene Bildformate abfragen
         depth_list, color_list = list_profiles(dev)
@@ -390,7 +433,8 @@ class CameraWorker(threading.Thread):
         # 3) Bestes passendes Profil wählen und prüfen, ob das SDK es auflösen kann
         d_choice = choose_profile(depth_list, want_w, want_h, want_fps)
         nur_tiefe = self.nur_tiefe
-        c_candidates = [c for c in color_list if c[2] == d_choice[2]] if not nur_tiefe else []
+        ohne_farbe = nur_tiefe or stufe >= 1
+        c_candidates = [c for c in color_list if c[2] == d_choice[2]] if not ohne_farbe else []
         c_choice = choose_profile(c_candidates, d_choice[0], d_choice[1], d_choice[2], prefer_rgb=True) \
             if c_candidates else None
 
@@ -442,20 +486,28 @@ class CameraWorker(threading.Thread):
         spatial, temporal, holes = rs.spatial_filter(), rs.temporal_filter(), rs.hole_filling_filter()
 
         hint = (" – Achtung: nur USB 2 erkannt" if geraet["usb"].startswith("2") else "") + abweichung
+        if stufe:
+            hint += f" – sicherer Modus (Stufe {stufe}) nach Kamerafehler"
+            log.info("Sicherer Modus Stufe %d: %s, Farbe %s", stufe, fmt_profiles([d_choice]),
+                     "an" if has_color else "aus")
         self._set_status(verbunden=True, demo=False, geraet=geraet,
                          aufloesung=f"{intr.width}x{intr.height} @ {fps} fps" + (
                              "" if has_color else (" (nur Tiefe – Raumscan)" if nur_tiefe else " (ohne Farbe)")),
-                         meldung="Kamera läuft" + hint, optionen=self._read_options(sensor))
+                         meldung="Kamera läuft" + hint,
+                         optionen=self._read_options(sensor))
         last_temp = 0.0
+        erstes_bild = True
         try:
             while not self.restart_flag.is_set():
                 self._process_option_queue(sensor)
                 if self.nur_tiefe != nur_tiefe:
                     break
                 try:
-                    frames = pipeline.wait_for_frames(3000)
+                    # das erste Bild braucht nach einem Neustart manchmal länger
+                    frames = pipeline.wait_for_frames(8000 if erstes_bild else 3000)
                 except Exception as exc:
                     raise RuntimeError(f"Keine Bilder mehr von der Kamera ({exc})")
+                erstes_bild = False
                 if align is not None:
                     frames = align.process(frames)
                 depth = frames.get_depth_frame()

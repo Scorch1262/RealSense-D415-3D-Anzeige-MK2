@@ -1,5 +1,23 @@
 # Änderungen
 
+## MK2 1.4.0
+- **macOS-Unterstützung entfernt** – das Programm ist wieder reines Windows-Programm:
+  Mac-Job aus dem GitHub-Actions-Workflow, `pyrealsense2-macosx`, Mac-Datenordner, Mac-Schriften
+  und die macOS-Sonderbehandlung der Kamerasteuerung entfernt
+- Beibehalten: Hardware-Reset und sicherer Modus bei hängender Kamera (aus 1.3.2), da sie auch
+  unter Windows helfen
+
+## MK2 1.3.2
+- **Kamera hängt nicht mehr fest** (macOS: „failed to set power state“, „Frame didn't arrive“,
+  get_xu-Zeitüberschreitungen): nach solchen Fehlern Hardware-Reset der Kamera und Warten auf die
+  Neuanmeldung, danach **sicherer Modus** in Stufen – ohne Farbe, 640×480 @ 15, 424×240 @ 15;
+  neue Auflösung/Bildrate durch den Nutzer setzt den sicheren Modus zurück
+- Erstes Bild darf bis zu 8 s dauern (vorher 3 s)
+- macOS: keine Steuerbefehle an die Kamera (Laser, Laserleistung, Preset, Temperatur), da diese über
+  libusb häufig hängen; Hinweis in der Seitenleiste
+- macOS: Systemschriften (Helvetica Neue, Menlo) statt Segoe UI – keine Schrift-Warnung mehr
+- README: Mac-Start mit vollständigem Pfad, Hinweise zu Firmware, Kabel und sicherem Modus
+
 ## MK2 1.3.1
 - Mac-Job im Workflow läuft auf `macos-15` statt `macos-14` (GitHub hat macOS-14-Runner am
   02.11.2026 abgeschaltet: „The configuration 'macos-14-arm64-us-xl' is not supported“)

@@ -1,6 +1,5 @@
 numpy>=1.26
-pyrealsense2>=2.55; sys_platform != "darwin"
-pyrealsense2-macosx==2.54.2; sys_platform == "darwin"   # macOS: universal2-Build, läuft ab macOS 12
+pyrealsense2>=2.55
 PySide6>=6.6
 pyqtgraph>=0.14
 PyOpenGL>=3.1.7

@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "RealSense-Viewer-MK2"
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.4.0"
 
 import numpy as np  # noqa: E402
 
@@ -135,11 +135,12 @@ LINE, LINE2 = "#232a32", "#2e3740"
 TEXT, MUTED = "#d7dde3", "#7d8893"
 AMBER, TEAL, RED = "#ffb000", "#19d3c5", "#ff5a5f"
 MONO = "Cascadia Mono, Consolas, JetBrains Mono, DejaVu Sans Mono, monospace"
+SANS = '"Segoe UI", "Inter", "Noto Sans", sans-serif'
 
 ARROW = (ASSET_DIR / "pfeil.png").as_posix()
 
 QSS = f"""
-* {{ font-family: "Segoe UI", "Inter", "Noto Sans", sans-serif; font-size: 10pt; color: {TEXT}; }}
+* {{ font-family: {SANS}; font-size: 10pt; color: {TEXT}; }}
 QMainWindow, #root {{ background: {BG}; }}
 #topbar {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #11161b, stop:1 #0d1115); border-bottom: 1px solid {LINE}; }}
 #brandTitle {{ color: {AMBER}; font-weight: 700; font-size: 11.5pt; letter-spacing: 2px; }}
@@ -815,6 +816,8 @@ class MainWindow(QMainWindow):
         # Projektor und Preset betreffen nur die Tiefe, nicht das Farbbild
         nur(self.cam_opts, "3d", "tiefe", "geteilt", "raum")
         self.cam_hint = p.add(make_label("Optionen nur mit angeschlossener Kamera.", "hint"))
+        self.cam_hint.setWordWrap(True)
+        self.cam_hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.btn_restart = p.add(make_button("KAMERA NEU VERBINDEN"))
         lay.addWidget(p)
 
@@ -891,7 +894,7 @@ class MainWindow(QMainWindow):
         cfg_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         cfg_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         p.add(cfg_lbl)
-        self.btn_folder = p.add(make_button("DATENORDNER ÖFFNEN" if sys.platform == "darwin" else "PROGRAMMORDNER ÖFFNEN"))
+        self.btn_folder = p.add(make_button("PROGRAMMORDNER ÖFFNEN"))
         lay.addWidget(p)
         lay.addStretch()
 
@@ -1210,8 +1213,6 @@ class MainWindow(QMainWindow):
         try:
             if sys.platform.startswith("win"):
                 os.startfile(path)  # noqa: S606
-            elif sys.platform == "darwin":
-                os.system(f'open "{path}"')
             else:
                 os.system(f'xdg-open "{path}" >/dev/null 2>&1 &')
         except Exception as exc:
