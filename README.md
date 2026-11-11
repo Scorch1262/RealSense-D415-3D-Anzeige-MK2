@@ -1,6 +1,6 @@
 # RealSense-Viewer-MK2
 
-**Version 1.1.0** · reines Desktop-Programm für Windows (kein Browser, kein Webserver)
+**Version 1.2.0** · reines Desktop-Programm für Windows (kein Browser, kein Webserver)
 
 Zeigt das 3D-Bild einer per USB angeschlossenen **Intel RealSense D415** live in einem eigenen Programmfenster an – im Design der Dashboards (dunkel, Amber/Teal). Neu in MK2: **Raumscan**. Man trägt die Kamera durch den Raum, das Programm setzt alle Bilder zu einer zusammenhängenden 3D-Karte zusammen – und durch diese Karte kann man anschließend **wie in einem virtuellen Raum gehen und sich umsehen** – mit Tastatur und Maus oder mit einer **3Dconnexion-3D-Maus**. Der Scan nutzt **nur die Tiefenkameras** (Stereo-IR) und funktioniert daher auch in **völliger Dunkelheit**.
 
@@ -12,7 +12,7 @@ Zeigt das 3D-Bild einer per USB angeschlossenen **Intel RealSense D415** live in
 
 1. Reiter **RAUM** öffnen (Taste 5) und **SCAN STARTEN** drücken.
 2. Kamera **langsam** schwenken und durch den Raum tragen, Abstand zu den Flächen 0,5–3 m. Rechts oben läuft das Live-Tiefenbild mit, die Karte wächst mit; die türkise Linie zeigt den bisherigen Weg der Kamera.
-3. Erscheint **TRACKING VERLOREN**, zur zuletzt erfassten Stelle zurückkehren und dorthin zielen – das Programm findet sich dann selbst wieder.
+3. Erscheint **TRACKING VERLOREN**, die Kamera auf einen **beliebigen bereits gescannten Bereich** richten (z. B. Schreibtisch mit Tastatur und Monitor) – aus ähnlichem Blickwinkel wie beim Scannen. Das Programm sucht unter allen früheren Ansichten die passendste heraus, legt das Bild an und prüft das Ergebnis gegen die gesamte Karte, bevor es weitermacht. So rastet es nicht an einer ähnlich aussehenden, aber falschen Wand ein.
 4. **SCAN PAUSIEREN**, dann **RAUM BEGEHEN** (Taste B). Der Boden wird automatisch erkannt und waagerecht ausgerichtet, man steht in Augenhöhe am Startpunkt des Scans.
 
 ### Nur Tiefe – auch im Dunkeln
@@ -56,7 +56,7 @@ Im Feld **3D-MAUS** der Seitenleiste stehen Gerätestatus und die sechs Achsen l
 
 - **Gehen:** feste Augenhöhe über dem Boden; mit „Wände und Möbel blockieren“ kann man nicht durch gescannte Hindernisse laufen, man gleitet an ihnen entlang.
 - **Fliegen:** frei in alle Richtungen, auch durch Wände und über Möbel.
-- **Augenhöhe, Gehtempo, Flächenfüllung** sind in der Seitenleiste einstellbar. Die Flächenfüllung macht die Punkte beim Begehen größer, damit Wände geschlossen wirken.
+- **Augenhöhe, Gehtempo, Punktgröße beim Begehen** sind in der Seitenleiste einstellbar. Die Punkte haben beim Begehen eine feste Bildschirmgröße (Standard 2 px, wie in der Scan-Ansicht) – auch direkt vor einer Wand werden sie nicht größer.
 - **Minikarte** rechts oben: Grundriss aus dem Scan, Amber-Pfeil = eigene Position und Blickrichtung, türkiser Punkt = Startpunkt.
 
 ### Raum speichern und laden
@@ -71,7 +71,7 @@ Ist keine D415 angeschlossen, liefert das Programm einen **Demo-Raum**: ein möb
 
 ### So funktioniert der Scan
 
-Jedes Tiefenbild wird per ICP (Punkt-zu-Ebene, grob-nach-fein) an ein Schlüsselbild angelegt. Daraus ergibt sich die Bahn der Kamera, mit der Punkte und Flächennormalen in eine gemeinsame Voxel-Karte eingetragen und gemittelt werden. Alles läuft in einem eigenen Thread, ohne zusätzliche Bibliotheken (nur numpy). Die D415 hat keinen Bewegungssensor, und der Scan nutzt bewusst nur die Form des Raums – er braucht daher räumliche Struktur im Bild: Möbel, Kanten, Ecken und Gegenstände helfen. Sieht die Kamera längere Zeit nur eine glatte Wand und den Boden, kann sich die Karte entlang dieser Flächen um einige Zentimeter verschieben; dann etwas mehr Raum ins Bild nehmen.
+Jedes Tiefenbild wird per ICP (Punkt-zu-Ebene, grob-nach-fein) an ein Schlüsselbild angelegt. Daraus ergibt sich die Bahn der Kamera, mit der Punkte und Flächennormalen in eine gemeinsame Voxel-Karte eingetragen und gemittelt werden. Jedes Schlüsselbild wird platzsparend mit einem groben Tiefen-Fingerabdruck gespeichert; nach einem Abbruch werden darüber die ähnlichsten früheren Ansichten gesucht und der Treffer erst übernommen, wenn mindestens 55 % der aktuellen Punkte auf bereits kartierten Flächen liegen. Alles läuft in einem eigenen Thread, ohne zusätzliche Bibliotheken (nur numpy). Die D415 hat keinen Bewegungssensor, und der Scan nutzt bewusst nur die Form des Raums – er braucht daher räumliche Struktur im Bild: Möbel, Kanten, Ecken und Gegenstände helfen. Sieht die Kamera längere Zeit nur eine glatte Wand und den Boden, kann sich die Karte entlang dieser Flächen um einige Zentimeter verschieben; dann etwas mehr Raum ins Bild nehmen.
 
 ## Weitere Funktionen (aus MK1)
 
@@ -139,7 +139,7 @@ Wird beim ersten Start neben der exe angelegt.
 | `[ansicht]` | `farbmodus`, `punktgroesse`, `ansicht` | Darstellung |
 | `[raum]` | `voxel_cm` | Punktabstand der Raumkarte: `1`, `2`, `3` |
 | `[raum]` | `modus`, `kollision` | `gehen` / `fliegen`, Hindernisse `ja` / `nein` |
-| `[raum]` | `augenhoehe_m`, `tempo_m_s`, `fuellung` | Begehen |
+| `[raum]` | `augenhoehe_m`, `tempo_m_s`, `punkt_px` | Begehen (Punktgröße in Pixeln) |
 | `[raum]` | `farbe` | Kartenfarbe `hoehe` oder `grau` |
 | `[3dmaus]` | `aktiv`, `empfindlichkeit` | 3D-Maus beim Begehen |
 | `[3dmaus]` | `umkehr_vor`, `umkehr_seite`, `umkehr_hoch`, `umkehr_neigen`, `umkehr_drehen` | Achsen umkehren (`ja`/`nein`) |
@@ -149,7 +149,7 @@ Wird beim ersten Start neben der exe angelegt.
 
 1. Inhalt dieser Zip in ein GitHub-Repository hochladen (inkl. Ordner `.github`).
 2. Bei jedem Push auf `main`/`master` baut der Workflow **Build Windows EXE** die exe mit PyInstaller, startet sie mit `--selbsttest` (prüft dabei auch den Raumscan am Demo-Raum und die 3D-Maus-Auswertung) und stellt sie als Artefakt bereit (Reiter *Actions* → Lauf → *Artifacts*).
-3. Für ein Release einen Tag setzen, z. B. `git tag v1.1.0 && git push --tags` – dann erscheint die fertige Zip unter *Releases*.
+3. Für ein Release einen Tag setzen, z. B. `git tag v1.2.0 && git push --tags` – dann erscheint die fertige Zip unter *Releases*.
 
 Die Versionsnummer steht in `app.py` (`APP_VERSION`) und wird automatisch in exe-Eigenschaften, Zip-Namen und Fenster übernommen.
 

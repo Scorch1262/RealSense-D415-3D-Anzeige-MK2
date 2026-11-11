@@ -69,7 +69,7 @@ DEFAULTS = {
         "kollision": "ja",             # Wände und Möbel blockieren beim Gehen
         "augenhoehe_m": "1.60",
         "tempo_m_s": "1.4",
-        "fuellung": "1.8",             # Größe der Punkte beim Begehen (× Voxelgröße)
+        "punkt_px": "2.0",             # Punktgröße beim Begehen in Pixeln (wie in der Scan-Ansicht)
         "letzter_ordner": "",
         "farbe": "hoehe",              # Kartenfarbe: hoehe | grau (schattiert, ohne Farbkamera)
     },

@@ -1,5 +1,17 @@
 # Änderungen
 
+## MK2 1.2.0
+- **Wiederfinden nach Tracking-Abbruch neu:** Statt nur in der Nähe der letzten (veralteten) Position zu
+  suchen, werden alle früheren Schlüsselbilder über einen Tiefen-Fingerabdruck verglichen; die ähnlichsten
+  werden per ICP angelegt. Damit findet sich das Tracking wieder, sobald ein bereits gescannter Bereich
+  erneut ins Bild kommt – auch aus etwas anderem Blickwinkel
+- Jeder Wiederfinden-Treffer wird gegen die Gesamtkarte geprüft (≥ 55 % der Punkte auf kartierten
+  Flächen); vorher konnte das Tracking an ähnlichen, aber falschen Wänden einrasten
+- Schlüsselbilder platzsparend gespeichert (float16), bis zu 1500 statt 400
+- **Begehen:** Punkte haben eine feste Bildschirmgröße wie in der Scan-Ansicht und werden in der Nähe
+  nicht mehr aufgebläht; Regler „Punktgröße beim Begehen“ (1–8 px) ersetzt die Flächenfüllung;
+  config.ini `[raum] punkt_px`
+
 ## MK2 1.1.0
 - **3Dconnexion-3D-Maus** beim Begehen: Kappe schieben = gehen, drehen = umdrehen, neigen = hoch/runter
   sehen, heben/drücken = hoch/runter (Fliegen), linke Taste = Startpunkt, rechte Taste = Gehen/Fliegen;

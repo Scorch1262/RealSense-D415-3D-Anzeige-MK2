@@ -26,6 +26,8 @@ log = logging.getLogger("RealSense-Viewer-MK2")
 C_VIEW = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], np.float64)
 
 ARBEITS_BREITE = 320          # Arbeitsauflösung für Tracking und Karte (Pixel)
+WIEDERFINDEN_KANDIDATEN = 5   # so viele ähnliche frühere Ansichten werden je Bild geprüft
+WIEDERFINDEN_STUFEN = ((8, 8, 0.45), (4, 6, 0.20), (2, 5, 0.10), (1, 4, 0.06))
 
 
 # --------------------------------------------------------------------------
@@ -229,6 +231,23 @@ class VoxelKarte:
             self.w = np.insert(self.w, ins, cnt[nf])
         self.version += 1
 
+    _NACHBARN = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]], np.int64)
+
+    def ueberdeckung(self, p, n_max=3000):
+        """Anteil der Punkte p (Welt), die auf bereits kartierten Voxeln (oder direkt daneben) liegen."""
+        if len(self.keys) == 0 or len(p) == 0:
+            return 0.0
+        if len(p) > n_max:
+            p = p[np.random.default_rng(0).choice(len(p), n_max, replace=False)]
+        i = np.floor(p / self.voxel).astype(np.int64) + self.OFF
+        treffer = np.zeros(len(p), bool)
+        for d in self._NACHBARN:
+            j = i + d
+            k = (j[:, 0] << 42) | (j[:, 1] << 21) | j[:, 2]
+            idx = np.minimum(np.searchsorted(self.keys, k), len(self.keys) - 1)
+            treffer |= self.keys[idx] == k
+        return float(treffer.mean())
+
     def punkte(self, min_w=1.5):
         m = self.w >= min_w
         if m.sum() < 1000:
@@ -242,6 +261,50 @@ class VoxelKarte:
 # --------------------------------------------------------------------------
 # Tracker
 # --------------------------------------------------------------------------
+class Schluesselbild:
+    """Platzsparend gespeichertes Schlüsselbild (Tiefe als float16) mit Pose und Fingerabdruck."""
+    __slots__ = ("tiefe", "intr", "pose", "abdruck", "_bild")
+
+    def __init__(self, bild, pose):
+        self.tiefe = bild.V[..., 2].astype(np.float16)
+        self.intr = (bild.fx, bild.fy, bild.ppx, bild.ppy)
+        self.pose = pose.copy()
+        self.abdruck = fingerabdruck(bild.V[..., 2])
+        self._bild = None
+
+    def bild(self, zmin, zmax):
+        if self._bild is None:
+            self._bild = Bild(self.tiefe.astype(np.float32), *self.intr, zmin, zmax)
+        return self._bild
+
+    def entladen(self):
+        self._bild = None
+
+
+def fingerabdruck(tiefe, gx=16, gy=9):
+    """Grobes Tiefenraster (gy × gx Zellen, Mittelwert gültiger Pixel, sonst NaN)."""
+    h, w = tiefe.shape
+    hh, ww = h // gy * gy, w // gx * gx
+    t = tiefe[:hh, :ww].reshape(gy, hh // gy, gx, ww // gx).astype(np.float32)
+    v = t > 0
+    n = v.sum((1, 3))
+    s = np.where(v, t, 0).sum((1, 3))
+    out = np.full((gy, gx), np.nan, np.float32)
+    ok = n > 0.3 * (hh // gy) * (ww // gx)
+    out[ok] = s[ok] / n[ok]
+    return out
+
+
+def abdruck_abstand(a, b):
+    """Mittlere relative Tiefendifferenz der gemeinsam gültigen Zellen (+ Strafe für Unterschiede)."""
+    va, vb = ~np.isnan(a), ~np.isnan(b)
+    beide = va & vb
+    if beide.sum() < 0.3 * a.size:
+        return 9.0
+    d = np.abs(a[beide] - b[beide]) / np.maximum(a[beide], 0.3)
+    return float(np.median(d) + 0.3 * (va ^ vb).mean())
+
+
 class Tracker:
     def __init__(self, voxel=0.02, zmin=0.2, zmax=3.5):
         self.voxel, self.zmin, self.zmax = voxel, zmin, zmax
@@ -253,7 +316,7 @@ class Tracker:
         self.key_pose = np.eye(4)   # Pose des Schlüsselbilds (Kamera -> Welt der ersten Kamera)
         self.pose = np.eye(4)       # aktuelle Pose
         self.prev_pose = np.eye(4)
-        self.keys_alt = []          # frühere Schlüsselbilder zum Wiederfinden
+        self.keys_alt = []          # frühere Schlüsselbilder (Schluesselbild) zum Wiederfinden
         self.bahn = []              # Kamerapositionen
         self.verloren = 0
         self.bilder = 0
@@ -300,14 +363,15 @@ class Tracker:
             step = np.linalg.inv(self.pose) @ (self.key_pose @ T)
             if np.linalg.norm(step[:3, 3]) > 0.35 or rot_angle(step[:3, :3]) > 30:
                 good = False
+        if good and self.verloren:
+            # nach einem Verlust erst übernehmen, wenn die Pose zur bisherigen Karte passt
+            good = self._passt_zur_karte(cur, self.key_pose @ T)
         if not good:
-            # Wiederfinden über frühere Schlüsselbilder in der Nähe
-            for kb, kp in sorted(self.keys_alt, key=lambda e: np.linalg.norm(e[1][:3, 3] - self.pose[:3, 3]))[:3]:
-                T2, f2, r2, e2 = icp(cur, kb, np.linalg.inv(kp) @ self.pose)
-                if f2 > 0.35 and r2 < 0.02 and e2 > 2e-4:
-                    self.key, self.key_pose = kb, kp
-                    T, frac, rmse, good = T2, f2, r2, True
-                    break
+            gefunden = self._wiederfinden(cur)
+            if gefunden is not None:
+                kb, T, frac = gefunden
+                self.key, self.key_pose = kb.bild(self.zmin, self.zmax), kb.pose.copy()
+                good = True
         self.guete = frac if good else 0.0
         if not good:
             self.verloren += 1
@@ -326,11 +390,46 @@ class Tracker:
         # neues Schlüsselbild?
         rel = np.linalg.inv(self.key_pose) @ self.pose
         if np.linalg.norm(rel[:3, 3]) > 0.12 or rot_angle(rel[:3, :3]) > 10 or frac < 0.55:
-            self.keys_alt.append((self.key, self.key_pose))
-            if len(self.keys_alt) > 400:
-                self.keys_alt = self.keys_alt[-400:]
+            self.keys_alt.append(Schluesselbild(cur, self.pose))
+            if len(self.keys_alt) > 1500:                 # ca. 170 MB
+                self.keys_alt = self.keys_alt[-1500:]
             self.key, self.key_pose = cur, self.pose.copy()
         return "ok"
+
+    # ---------------------------------------------------------------- Wiederfinden
+    def _passt_zur_karte(self, cur, pose, schwelle=0.55):
+        P = cur.V[cur.M]
+        Pw = P @ pose[:3, :3].T.astype(np.float32) + pose[:3, 3].astype(np.float32)
+        return self.karte.ueberdeckung(Pw) >= schwelle
+
+    def _wiederfinden(self, cur):
+        """Sucht nach einem Tracking-Verlust die ähnlichsten früheren Ansichten (unabhängig von der
+        zuletzt bekannten Position), legt das Bild per ICP an und prüft das Ergebnis gegen die Karte."""
+        if not self.keys_alt:
+            return None
+        abdruck = fingerabdruck(cur.V[..., 2])
+        abst = np.array([abdruck_abstand(abdruck, k.abdruck) for k in self.keys_alt])
+        reihenfolge = np.argsort(abst)[:WIEDERFINDEN_KANDIDATEN]
+        bester = None
+        for i in reihenfolge:
+            if abst[i] > 0.35:
+                break
+            kb = self.keys_alt[i]
+            ref = kb.bild(self.zmin, self.zmax)
+            T, frac, rmse, ev = icp(cur, ref, np.eye(4), stufen=WIEDERFINDEN_STUFEN)
+            if not (frac > 0.40 and rmse < 0.02 and ev > 2e-4):
+                continue
+            pose = kb.pose @ T
+            P = cur.V[cur.M]
+            ueb = self.karte.ueberdeckung(P @ pose[:3, :3].T.astype(np.float32) + pose[:3, 3].astype(np.float32))
+            if ueb >= 0.55 and (bester is None or ueb * frac > bester[0]):
+                bester = (ueb * frac, kb, T, frac)
+                if ueb > 0.8:
+                    break
+        # Zwischenspeicher klein halten
+        for k in self.keys_alt[:-3]:
+            k.entladen()
+        return None if bester is None else bester[1:]
 
     def _eintragen(self, cur, pose):
         m = cur.M

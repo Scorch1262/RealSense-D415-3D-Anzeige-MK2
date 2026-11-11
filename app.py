@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "RealSense-Viewer-MK2"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 import numpy as np  # noqa: E402
 
@@ -725,10 +725,10 @@ class MainWindow(QMainWindow):
         p.add(row)
         self.rng_tempo = p.add(QSlider(Qt.Horizontal))
         self.rng_tempo.setRange(3, 30)         # dm/s
-        row, self.lbl_fuell = field_header("Flächenfüllung")
+        row, self.lbl_fuell = field_header("Punktgröße beim Begehen")
         p.add(row)
         self.rng_fuell = p.add(QSlider(Qt.Horizontal))
-        self.rng_fuell.setRange(10, 40)        # × Voxel / 10
+        self.rng_fuell.setRange(2, 16)         # halbe Pixel
         self.btn_start = p.add(make_button("ZUM STARTPUNKT"))
         hint = make_label("W A S D / Pfeile: gehen · Maus ziehen: umsehen · Q/E: runter/hoch · "
                           "Umschalt: schnell · R: Start · F: Gehen/Fliegen · Esc: beenden", "hint")
@@ -1086,7 +1086,7 @@ class MainWindow(QMainWindow):
                 return default
         self.rng_auge.setValue(int(round(num("augenhoehe_m", 1.6) * 100)))
         self.rng_tempo.setValue(int(round(num("tempo_m_s", 1.4) * 10)))
-        self.rng_fuell.setValue(int(round(num("fuellung", 1.8) * 10)))
+        self.rng_fuell.setValue(int(round(num("punkt_px", 2.0) * 2)))
         self._on_walk_opts()
         self.seg_farbe.set_value(self.raum_farbe)
         self.chk_maus.setChecked(truthy(cfg_get("3dmaus", "aktiv")))
@@ -1493,8 +1493,8 @@ class MainWindow(QMainWindow):
         col = np.ones((len(pos), 4), np.float32)
         col[:, :3] = self._raum_farben(pos)
         if walk:
-            size = self.raum_voxel * self.rng_fuell.value() / 10
-            self.raum_cloud.setData(pos=pos, color=col, size=size, pxMode=False)
+            # feste Bildschirmgröße wie beim Scan – nahe Punkte werden nicht aufgebläht
+            self.raum_cloud.setData(pos=pos, color=col, size=self.rng_fuell.value() / 2, pxMode=True)
         else:
             self.raum_cloud.setData(pos=pos, color=col, size=max(1.5, self.point_size), pxMode=True)
         bahn = self.raum_bahn if self.raum_quelle == "scan" else np.zeros((0, 3), np.float32)
@@ -1682,10 +1682,10 @@ class MainWindow(QMainWindow):
     def _on_walk_opts(self):
         auge = self.rng_auge.value() / 100
         tempo = self.rng_tempo.value() / 10
-        fuell = self.rng_fuell.value() / 10
+        fuell = self.rng_fuell.value() / 2
         self.lbl_auge.setText(f"{auge:.2f} m")
         self.lbl_tempo.setText(f"{tempo:.1f} m/s")
-        self.lbl_fuell.setText(f"{fuell:.1f} ×")
+        self.lbl_fuell.setText(f"{fuell:.1f} px")
         self.raum.kollision = self.chk_kollision.isChecked()
         self.raum.tempo = tempo
         if abs(self.raum.augenhoehe - auge) > 1e-6:
@@ -1698,7 +1698,7 @@ class MainWindow(QMainWindow):
         cfg_set("raum", "kollision", self.chk_kollision.isChecked())
         cfg_set("raum", "augenhoehe_m", f"{auge:.2f}")
         cfg_set("raum", "tempo_m_s", f"{tempo:.1f}")
-        cfg_set("raum", "fuellung", f"{fuell:.1f}")
+        cfg_set("raum", "punkt_px", f"{fuell:.1f}")
         self.save_timer.start()
         if self.raum.walk and self.sender() is self.rng_fuell:
             self._raum_anzeigen()
