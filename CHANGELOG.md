@@ -1,10 +1,16 @@
 # Änderungen
 
+## MK2 1.3.1
+- Mac-Job im Workflow läuft auf `macos-15` statt `macos-14` (GitHub hat macOS-14-Runner am
+  02.11.2026 abgeschaltet: „The configuration 'macos-14-arm64-us-xl' is not supported“)
+- `pyrealsense2-macosx` auf 2.54.2 (universal2) festgelegt, damit die App weiterhin ab macOS 12 läuft;
+  neuere Versionen gibt es nur für macOS 15+
+
 ## MK2 1.3.0
 - **Seitenleiste je Ansicht:** Es werden nur noch Panels und Einstellungen gezeigt, die in der gewählten
   Ansicht etwas bewirken (z. B. Raumscan/Begehen/3D-Maus nur im RAUM, Darstellung nicht bei Tiefe/Farbe,
   Distanzbereich nicht im RAUM, Projektor/Preset nicht bei FARBE)
-- **Mac-App für Apple Silicon (arm64)** im GitHub-Actions-Workflow: eigener Job auf `macos-14`,
+- **Mac-App für Apple Silicon (arm64)** im GitHub-Actions-Workflow: eigener Job auf `macos-14` (ab 1.3.1: `macos-15`),
   App-Paket mit icns-Symbol, Versionsnummer, ad-hoc-Signatur, Selbsttest und Zip
   (`…_Mac-AppleSilicon.zip`), bei Tags auch im Release
 - macOS: pyrealsense2 über das Paket `pyrealsense2-macosx`; config.ini, Protokoll und Selbsttest im

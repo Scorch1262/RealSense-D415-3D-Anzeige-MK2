@@ -88,8 +88,8 @@ jobs:
           files: release/*.zip
 
   mac:
-    # macos-14 = Apple Silicon (arm64)
-    runs-on: macos-14
+    # macos-15 = Apple Silicon (arm64); macos-14 wurde von GitHub am 02.11.2026 abgeschaltet
+    runs-on: macos-15
     steps:
       - name: Code holen
         uses: actions/checkout@v4

@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "RealSense-Viewer-MK2"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 
 import numpy as np  # noqa: E402
 

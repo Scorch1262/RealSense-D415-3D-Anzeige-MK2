@@ -1,6 +1,6 @@
 # RealSense-Viewer-MK2
 
-**Version 1.3.0** · reines Desktop-Programm für Windows und macOS auf Apple Silicon (kein Browser, kein Webserver)
+**Version 1.3.1** · reines Desktop-Programm für Windows und macOS auf Apple Silicon (kein Browser, kein Webserver)
 
 Zeigt das 3D-Bild einer per USB angeschlossenen **Intel RealSense D415** live in einem eigenen Programmfenster an – im Design der Dashboards (dunkel, Amber/Teal). Neu in MK2: **Raumscan**. Man trägt die Kamera durch den Raum, das Programm setzt alle Bilder zu einer zusammenhängenden 3D-Karte zusammen – und durch diese Karte kann man anschließend **wie in einem virtuellen Raum gehen und sich umsehen** – mit Tastatur und Maus oder mit einer **3Dconnexion-3D-Maus**. Der Scan nutzt **nur die Tiefenkameras** (Stereo-IR) und funktioniert daher auch in **völliger Dunkelheit**.
 
@@ -172,10 +172,10 @@ Wird beim ersten Start neben der exe angelegt (Mac: im Datenordner, siehe oben).
 1. Inhalt dieser Zip in ein GitHub-Repository hochladen (inkl. Ordner `.github`).
 2. Bei jedem Push auf `main`/`master` baut der Workflow **Build Windows EXE und Mac-App (Apple Silicon)** parallel
    - die Windows-exe (`windows-latest`) und
-   - die Mac-App für Apple Silicon/arm64 (`macos-14`, App-Paket mit Symbol und Versionsnummer, ad hoc signiert),
+   - die Mac-App für Apple Silicon/arm64 (`macos-15`, App-Paket mit Symbol und Versionsnummer, ad hoc signiert, lauffähig ab macOS 12),
 
    startet beide mit `--selbsttest` (prüft dabei auch den Raumscan am Demo-Raum und die 3D-Maus-Auswertung) und stellt sie als Artefakte bereit (Reiter *Actions* → Lauf → *Artifacts*).
-3. Für ein Release einen Tag setzen, z. B. `git tag v1.3.0 && git push --tags` – dann erscheinen `…_Windows.zip` und `…_Mac-AppleSilicon.zip` unter *Releases*.
+3. Für ein Release einen Tag setzen, z. B. `git tag v1.3.1 && git push --tags` – dann erscheinen `…_Windows.zip` und `…_Mac-AppleSilicon.zip` unter *Releases*.
 
 Die Versionsnummer steht in `app.py` (`APP_VERSION`) und wird automatisch in exe-Eigenschaften, Zip-Namen und Fenster übernommen.
 
